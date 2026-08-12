@@ -21,7 +21,7 @@ git submodule update --init research/repos/mu_aloha_platforms
 ## 构建
 
 ```bash
-python3 implementation/uefi/validate.py
+python3 implementation/uefi/validate.py --profile ufs-offline
 chmod +x implementation/uefi/build-gts6lwifi.sh
 ./implementation/uefi/build-gts6lwifi.sh
 ```

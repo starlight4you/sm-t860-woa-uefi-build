@@ -7,7 +7,7 @@
 
 目标：仅完成 samsung-gts6lwifi 的 UFS-offline 离线 UEFI 构建与可复现验证。先初始化固定的 research/repos/mu_aloha_platforms submodule；把 implementation/build/acpi-ufs-offline/DSDT.aml 注入其临时工作树；让脚本移除 APRIORI.inc、DXE.inc、DXE.dsc.inc 中三处有效 UFSDxe 引用并保留 SdccDxe；构建 SM8150_EFI.fd 和 samsung-gts6lwifi.img；归档为 implementation/build/uefi/gts6lwifi-ufs-offline.fd 与 gts6lwifi-ufs-offline.img。最终状态必须是 pass-ufs-offline-uefi-build，同时 deployable 保持 false。
 
-先做只读检查：记录发行版、uname、CPU 架构、Python、Git、Mono、clang/LLVM、AArch64 GCC 和磁盘空间；用 sha256sum -c INPUTS.sha256 核对输入；运行 git submodule update --init research/repos/mu_aloha_platforms；确认 submodule HEAD 为 96add763040d86d21f87a4a4022e094e17e6e3c6；先运行 python3 implementation/uefi/validate.py。不要 git pull、rebase 或改变 submodule 指针；允许按上游锁定 revision 初始化其内部 submodule 和下载编译依赖。
+先做只读检查：记录发行版、uname、CPU 架构、Python、Git、Mono、clang/LLVM、AArch64 GCC 和磁盘空间；用 sha256sum -c INPUTS.sha256 核对输入；运行 git submodule update --init research/repos/mu_aloha_platforms；确认 submodule HEAD 为 96add763040d86d21f87a4a4022e094e17e6e3c6；先运行 python3 implementation/uefi/validate.py --profile ufs-offline。不要 git pull、rebase 或改变 submodule 指针；允许按上游锁定 revision 初始化其内部 submodule 和下载编译依赖。
 
 如果缺依赖，识别发行版后安装所需构建包。特别检查实际 LLVM/clang 目录，在真正执行 build_uefi.py 的环境中设置正确的 CLANGPDB_BIN，并设置 CLANGPDB_AARCH64_PREFIX=aarch64-linux-gnu-；不要盲信 build_setup.sh 中不会传回父 shell的 export 或硬编码 LLVM 路径。
 
