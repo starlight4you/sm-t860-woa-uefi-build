@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "validated_at_utc": "2026-08-12T14:31:52.042781+00:00",
+  "device": "samsung-gts6lwifi",
+  "status": "pass-offline-uefi-build",
+  "deployable": false,
+  "aml": {
+    "path": "implementation/build/acpi/DSDT.aml",
+    "bytes": 360474,
+    "sha256": "3127d563379cc34c1ed1b7ef59eff139ca602a9ad657bf976ab2eb8b8cf239dd"
+  },
+  "reference_aml_sha256": "a710f7a40002babe7f3c7de78093fffa6dd2c5078a19d3a3c7a76b0d0e72c698",
+  "fdf_device_dsdt_include": "SECTION RAW = SurfaceDuo1Pkg/Device/$(TARGET_DEVICE)/ACPI/DSDT.aml",
+  "host_build_required": "Linux x86_64, Python >= 3.12",
+  "device_writes_performed": false,
+  "firmware": {
+    "path": "implementation/build/uefi/gts6lwifi-mvp.fd",
+    "bytes": 3145728,
+    "sha256": "2b2fdd1caef13b591fe521964223925712b8f4962b9b8e268ad0c223973adaa9",
+    "embedded_aml_occurrences": 1
+  },
+  "boot_image": {
+    "path": "implementation/build/uefi/gts6lwifi-mvp.img",
+    "bytes": 3837952,
+    "sha256": "d0dffb764f3fa6010ff74ac6fe180b3ab77daa9672108257764813002fd95b5f",
+    "embedded_aml_occurrences": 1
+  }
+}
