@@ -1,0 +1,5 @@
+[submodule "research/repos/mu_aloha_platforms"]
+	path = research/repos/mu_aloha_platforms
+	url = https://github.com/Project-Aloha/mu_aloha_platforms.git
+	shallow = true
+

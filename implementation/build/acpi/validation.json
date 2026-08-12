@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "validated_at_utc": "2026-08-12T10:44:33.983085+00:00",
+  "source": "research/device-sm-t860/t860-current.dsl",
+  "pep_include": "implementation/acpi/t860-pep.asl",
+  "aml": "implementation/build/acpi/DSDT.aml",
+  "aml_bytes": 360474,
+  "aml_sha256": "3127d563379cc34c1ed1b7ef59eff139ca602a9ad657bf976ab2eb8b8cf239dd",
+  "compiler": {
+    "version": "ACPICA 20260408",
+    "errors": 0,
+    "warnings": 67,
+    "remarks": 434,
+    "warnings_are_inherited_baseline_debt": true
+  },
+  "mvp_nodes": [
+    "IC12",
+    "FG01",
+    "IC15",
+    "WACM"
+  ],
+  "device_writes_performed": false,
+  "status": "pass"
+}

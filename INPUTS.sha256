@@ -1,0 +1,3 @@
+96d24907ef9359668b8d1cff5af42f8b8235a83c74471e5dd25af3dd0b1f9e8a  implementation/uefi/build-gts6lwifi.sh
+7dd7400ec02e7149494500a738558e0b5c4aaf71693a2c5ea474b459782abe18  implementation/uefi/validate.py
+3127d563379cc34c1ed1b7ef59eff139ca602a9ad657bf976ab2eb8b8cf239dd  implementation/build/acpi/DSDT.aml
