@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "profile": "gts6lwifi-ufs-offline",
+  "source_tree": "/tmp/t860-uefi-build.ICMV40/mu_aloha_platforms",
+  "files": {
+    "APRIORI.inc": {
+      "active_ufs_before": 1,
+      "active_ufs_after": 0,
+      "active_sdcc_after": 1
+    },
+    "DXE.inc": {
+      "active_ufs_before": 1,
+      "active_ufs_after": 0,
+      "active_sdcc_after": 1
+    },
+    "DXE.dsc.inc": {
+      "active_ufs_before": 1,
+      "active_ufs_after": 0,
+      "active_sdcc_after": 1
+    }
+  },
+  "status": "pass-ufs-offline-source-preparation"
+}

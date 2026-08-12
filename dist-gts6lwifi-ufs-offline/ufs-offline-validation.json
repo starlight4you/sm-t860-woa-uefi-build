@@ -1,0 +1,37 @@
+{
+  "schema": 1,
+  "validated_at_utc": "2026-08-12T23:44:11.303934+00:00",
+  "device": "samsung-gts6lwifi",
+  "profile": "ufs-offline",
+  "status": "pass-ufs-offline-uefi-build",
+  "deployable": false,
+  "aml": {
+    "path": "implementation/build/acpi-ufs-offline/DSDT.aml",
+    "bytes": 360436,
+    "sha256": "43616254541c522b4bdd171776224e32205b6edd7deace17067466d15a961b0d"
+  },
+  "reference_aml_sha256": "a710f7a40002babe7f3c7de78093fffa6dd2c5078a19d3a3c7a76b0d0e72c698",
+  "fdf_device_dsdt_include": "SECTION RAW = SurfaceDuo1Pkg/Device/$(TARGET_DEVICE)/ACPI/DSDT.aml",
+  "host_build_required": "Linux x86_64, Python >= 3.12",
+  "device_writes_performed": false,
+  "firmware": {
+    "path": "implementation/build/uefi/gts6lwifi-ufs-offline.fd",
+    "bytes": 3145728,
+    "sha256": "b86c695a34ceeb540840be71fc53087c82d9bf86c0a18e981b38d19cea3c24e5",
+    "embedded_aml_occurrences": 1
+  },
+  "firmware_driver_inventory": {
+    "parser": "uefi_firmware 1.16",
+    "ufs_driver_guid": "0d35cd8e-97ea-4f9a-96af-0f0d89f76567",
+    "ufs_driver_present": false,
+    "sdcc_driver_guid": "f10f76db-42c1-533f-34a8-69be24653110",
+    "sdcc_driver_present": true
+  },
+  "boot_image": {
+    "path": "implementation/build/uefi/gts6lwifi-ufs-offline.img",
+    "bytes": 3837952,
+    "sha256": "ec672cf48f7ac67b27644249b79d9884c4c2a8dfa3a1c9e171e744068fdfdb21",
+    "embedded_aml_occurrences": 1,
+    "embedded_exact_firmware_occurrences": 1
+  }
+}
