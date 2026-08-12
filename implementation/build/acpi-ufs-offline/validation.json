@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "validated_at_utc": "2026-08-12T16:40:35.153878+00:00",
+  "profile": "gts6lwifi-ufs-offline",
+  "aml": "implementation/build/acpi-ufs-offline/DSDT.aml",
+  "aml_bytes": 360436,
+  "aml_sha256": "43616254541c522b4bdd171776224e32205b6edd7deace17067466d15a961b0d",
+  "internal_ufs_acpi_status": {
+    "UFS0": 0,
+    "UFS1": 0
+  },
+  "removable_storage_acpi_status": {
+    "SDC2": 15
+  },
+  "deployable": false,
+  "device_writes_performed": false,
+  "status": "pass-ufs-offline-acpi"
+}

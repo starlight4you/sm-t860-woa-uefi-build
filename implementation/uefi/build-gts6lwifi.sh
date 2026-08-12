@@ -4,7 +4,7 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "$0")" && pwd)"
 workspace="$(cd "$script_dir/../.." && pwd)"
 uefi_source="$workspace/research/repos/mu_aloha_platforms"
-aml="$workspace/implementation/build/acpi/DSDT.aml"
+aml="$workspace/implementation/build/acpi-ufs-offline/DSDT.aml"
 output_dir="$workspace/implementation/build/uefi"
 
 host_os="$(uname -s)"
@@ -28,12 +28,12 @@ for command in git pip mono clang; do
     fi
 done
 
-if ! git -C "$uefi_source" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+if [[ ! -d "$uefi_source/.git" ]]; then
     echo "error: UEFI source repository missing: $uefi_source" >&2
     exit 2
 fi
 if [[ ! -f "$aml" ]]; then
-    echo "error: build the ACPI artifact first: ./implementation/acpi/build.sh" >&2
+    echo "error: build the safety ACPI artifact first: ./implementation/acpi/build-ufs-offline.sh" >&2
     exit 2
 fi
 
@@ -50,11 +50,13 @@ git clone --local --recurse-submodules "$uefi_source" "$worktree/mu_aloha_platfo
 build_root="$worktree/mu_aloha_platforms"
 target_aml="$build_root/Platforms/SurfaceDuo1Pkg/Device/samsung-gts6lwifi/ACPI/DSDT.aml"
 install -m 0644 "$aml" "$target_aml"
+python3 "$script_dir/prepare-ufs-offline.py" "$build_root" \
+    --report "$output_dir/ufs-offline-source-preparation.json"
 
 (
     cd "$build_root"
     ./build_setup.sh
-    python3 -m pip install --upgrade -r pip-requirements.txt
+    python3 -m pip install --upgrade -r pip-requirements.txt 'uefi_firmware==1.16'
     ./build_uefi.py --init
     ./build_uefi.py -d samsung-gts6lwifi
 ) 2>&1 | tee "$output_dir/build.log"
@@ -66,10 +68,11 @@ if [[ -z "$firmware" || ! -s "$firmware" || ! -s "$boot_image" ]]; then
     exit 1
 fi
 
-install -m 0644 "$firmware" "$output_dir/gts6lwifi-mvp.fd"
-install -m 0644 "$boot_image" "$output_dir/gts6lwifi-mvp.img"
+install -m 0644 "$firmware" "$output_dir/gts6lwifi-ufs-offline.fd"
+install -m 0644 "$boot_image" "$output_dir/gts6lwifi-ufs-offline.img"
 python3 "$script_dir/validate.py" \
-    --firmware "$output_dir/gts6lwifi-mvp.fd" \
-    --boot-image "$output_dir/gts6lwifi-mvp.img"
+    --profile ufs-offline \
+    --firmware "$output_dir/gts6lwifi-ufs-offline.fd" \
+    --boot-image "$output_dir/gts6lwifi-ufs-offline.img"
 
-echo "UEFI artifacts were built and verified offline. They remain non-deployable."
+echo "UFS-offline UEFI artifacts were built and verified offline. They remain non-deployable."
