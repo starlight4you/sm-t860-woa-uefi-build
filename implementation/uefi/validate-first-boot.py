@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import importlib.metadata
 import json
+import os
 import re
 import subprocess
 from datetime import datetime, timedelta, timezone
@@ -89,6 +90,38 @@ RECOVERY_TRIGGER_PROTOCOL_ID = (
     "t860-dwh1-download-black-to-recovery-key-transition-v1"
 )
 EXPECTED_RECOVERY_TRIGGER_REPORT_SHA256: str | None = None
+
+# A future execution binary is deliberately separate from the untraceable
+# Heimdall 2.0.2 binary retained in the historical transport evidence.  These
+# immutable source facts identify the only currently reviewed source candidate.
+# None of the review digests below may be supplied by an evidence report: they
+# require a code review and a validator change.  Their None defaults make every
+# candidate fail closed at a pending state.
+EXECUTION_HEIMDALL_REPOSITORY = "https://git.sr.ht/~grimler/Heimdall"
+EXECUTION_HEIMDALL_TAG = "v2.2.2"
+EXECUTION_HEIMDALL_TAG_OBJECT = "2316fe346fece34726619498f34446b6d3df7c3a"
+EXECUTION_HEIMDALL_COMMIT = "d9554e7fa30a00abed7f0ac86b10e63c2c3b8e20"
+EXECUTION_HEIMDALL_TREE = "5ea9109a5005fbdc075443ebe16955b87d002ed5"
+EXECUTION_HEIMDALL_ARCHIVE_URL = (
+    "https://git.sr.ht/~grimler/Heimdall/archive/v2.2.2.tar.gz"
+)
+EXECUTION_HEIMDALL_ARCHIVE_SHA256 = (
+    "7d01dd8bf9c2f93ea016ae8b059110c50cea49e78670e8a1333ebd5899cdaaa3"
+)
+EXECUTION_HEIMDALL_SIGNING_FINGERPRINT = (
+    "2C7F29AE97891F6419A9E2CDB0076E490B71616B"
+)
+EXPECTED_EXECUTION_HEIMDALL_SIGNING_KEY_SHA256: str | None = None
+EXPECTED_EXECUTION_TOOL_BINARY_SHA256: str | None = None
+EXPECTED_EXECUTION_TOOL_PROVENANCE_REPORT_SHA256: str | None = None
+EXPECTED_EXECUTION_TOOL_LIVENESS_REPORT_SHA256: str | None = None
+# The current implementation is a fail-closed candidate collector only.  Do
+# not set this True merely because the four review digests above are known.
+# A later reviewed implementation must first parse the actual binary and its
+# dependencies, perform real signature verification, bind source to build
+# output, require an exact allowlisted collector/watchdog invocation, and
+# remove pathname TOCTOU from the executor handoff.
+EXECUTION_TOOL_PASS_VALIDATION_IMPLEMENTED = False
 RECOVERY_TRIGGER_REQUIRED_STOP_CONDITIONS = {
     "identity-mismatch",
     "multiple-or-no-download-device",
@@ -271,10 +304,28 @@ STOCK_CRITICAL = {
 SHA256_RE = re.compile(r"[0-9a-fA-F]{64}\Z")
 
 
+class DuplicateJsonKey(ValueError):
+    """Raised when an evidence JSON object contains an ambiguous duplicate key."""
+
+
+def reject_duplicate_json_keys(
+    pairs: list[tuple[str, Any]],
+) -> dict[str, Any]:
+    value: dict[str, Any] = {}
+    for key, item in pairs:
+        if key in value:
+            raise DuplicateJsonKey(f"duplicate JSON key {key!r}")
+        value[key] = item
+    return value
+
+
 def load_json(path: Path) -> dict[str, Any]:
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        value = json.loads(
+            path.read_text(encoding="utf-8"),
+            object_pairs_hook=reject_duplicate_json_keys,
+        )
+    except (OSError, json.JSONDecodeError, DuplicateJsonKey) as exc:
         raise SystemExit(f"validation failed: cannot read JSON {path}: {exc}") from exc
     if not isinstance(value, dict):
         raise SystemExit(f"validation failed: expected JSON object in {path}")
@@ -399,8 +450,129 @@ def valid_sha256(value: object) -> bool:
 def require_equal(
     reasons: list[str], label: str, actual: object, expected: object
 ) -> None:
-    if actual != expected:
+    if not values_strictly_equal(actual, expected):
         reasons.append(f"{label}: expected {expected!r}, found {actual!r}")
+
+
+def values_strictly_equal(actual: object, expected: object) -> bool:
+    """Compare JSON-like facts without Python's bool/int equivalence."""
+
+    if type(actual) is not type(expected):
+        return False
+    if isinstance(expected, dict):
+        return set(actual) == set(expected) and all(
+            values_strictly_equal(actual[key], expected[key]) for key in expected
+        )
+    if isinstance(expected, (list, tuple)):
+        return len(actual) == len(expected) and all(
+            values_strictly_equal(left, right)
+            for left, right in zip(actual, expected)
+        )
+    return actual == expected
+
+
+def require_exact_keys(
+    reasons: list[str], label: str, value: object, expected: set[str]
+) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        reasons.append(f"{label} must be an object")
+        return None
+    require_equal(reasons, f"{label} keys", set(value), expected)
+    return value
+
+
+def validate_bound_file(
+    reasons: list[str],
+    label: str,
+    evidence_root: Path | None,
+    value: object,
+) -> dict[str, Any] | None:
+    binding = require_exact_keys(
+        reasons, label, value, {"path", "bytes", "sha256"}
+    )
+    if binding is None or evidence_root is None:
+        return None
+    relative = binding.get("path")
+    if not isinstance(relative, str) or not relative:
+        reasons.append(f"{label} path must be a non-empty relative path")
+        return None
+    try:
+        relative_path = Path(relative)
+        if relative_path.is_absolute():
+            reasons.append(f"{label} path must be a non-empty relative path")
+            return None
+        unresolved = evidence_root / relative_path
+        resolved = unresolved.resolve()
+        if evidence_root not in resolved.parents or not resolved.is_file():
+            reasons.append(f"{label} path escapes evidence_root or is missing")
+            return None
+        if unresolved.is_symlink():
+            reasons.append(f"{label} must not be a symbolic link")
+            return None
+        record = file_record(resolved)
+    except (OSError, RuntimeError, ValueError) as exc:
+        reasons.append(f"{label} path cannot be resolved safely: {exc}")
+        return None
+    require_equal(reasons, f"{label} bytes", binding.get("bytes"), record["bytes"])
+    require_equal(
+        reasons, f"{label} SHA-256", binding.get("sha256"), record["sha256"]
+    )
+    return record
+
+
+def require_distinct_bound_files(
+    reasons: list[str], label: str, records: dict[str, dict[str, Any]]
+) -> None:
+    seen: dict[tuple[int, int], str] = {}
+    for name, record in records.items():
+        try:
+            stat = Path(record["path"]).stat()
+        except (KeyError, OSError, TypeError, ValueError) as exc:
+            reasons.append(f"{label} {name} cannot be stat'ed: {exc}")
+            continue
+        identity = (stat.st_dev, stat.st_ino)
+        if identity in seen:
+            reasons.append(
+                f"{label} {name} must be a distinct file from {seen[identity]}"
+            )
+        else:
+            seen[identity] = name
+
+
+def read_bound_text(
+    reasons: list[str], label: str, record: dict[str, Any]
+) -> str | None:
+    """Read an already-bound text file without exposing a TOCTOU traceback."""
+
+    try:
+        return Path(record["path"]).read_text(encoding="utf-8", errors="replace")
+    except (KeyError, OSError, RuntimeError, TypeError, ValueError) as exc:
+        reasons.append(f"{label} cannot be read safely: {exc}")
+        return None
+
+
+def read_bound_bytes(
+    reasons: list[str], label: str, record: dict[str, Any]
+) -> bytes | None:
+    """Read an already-bound binary file without exposing a TOCTOU traceback."""
+
+    try:
+        return Path(record["path"]).read_bytes()
+    except (KeyError, OSError, RuntimeError, TypeError, ValueError) as exc:
+        reasons.append(f"{label} cannot be read safely: {exc}")
+        return None
+
+
+def stat_bound_file(
+    reasons: list[str], label: str, record: dict[str, Any]
+) -> os.stat_result | None:
+    """Stat an already-bound file without exposing a TOCTOU traceback."""
+
+    try:
+        return Path(record["path"]).stat()
+    except (KeyError, OSError, RuntimeError, TypeError, ValueError) as exc:
+        reasons.append(f"{label} cannot be stat'ed safely: {exc}")
+        return None
 
 
 def run_git(repository: Path, *arguments: str) -> str:
@@ -991,6 +1163,885 @@ def validate_static_reports_and_artifacts(
 
 def pending_gate(reason: str) -> dict[str, Any]:
     return {"state": "pending", "reasons": [reason]}
+
+
+def validate_execution_tool_provenance_report(
+    path: Path | None,
+) -> dict[str, Any]:
+    """Validate facts for a candidate Heimdall execution binary.
+
+    This gate intentionally has no report-controlled status or trust Boolean.
+    A binary/report digest must be fixed in this validator by later code review
+    before a structurally valid candidate can pass.
+    """
+
+    if path is None:
+        return {
+            "state": "pending",
+            "status": "pending-source-provenance",
+            "reasons": ["execution-tool provenance report was not supplied"],
+        }
+    reasons: list[str] = []
+    try:
+        report_path = path.expanduser().resolve()
+        report = load_json(report_path)
+        report_file = report_record(report_path)
+    except (OSError, RuntimeError, SystemExit, ValueError) as exc:
+        return {
+            "state": "fail",
+            "status": "fail-execution-tool-provenance",
+            "path": str(path),
+            "report": None,
+            "reasons": [str(exc)],
+        }
+
+    require_exact_keys(
+        reasons,
+        "execution-tool provenance report",
+        report,
+        {
+            "schema",
+            "report_type",
+            "device_writes_performed",
+            "deployable",
+            "explicit_device_write_authorization_recorded",
+            "evidence_root",
+            "source",
+            "build",
+            "binary",
+        },
+    )
+    for field, expected in {
+        "schema": 1,
+        "report_type": "sm-t860-execution-tool-provenance",
+        "device_writes_performed": False,
+        "deployable": False,
+        "explicit_device_write_authorization_recorded": False,
+    }.items():
+        require_equal(reasons, f"execution-tool provenance {field}", report.get(field), expected)
+
+    evidence_root_value = report.get("evidence_root")
+    evidence_root: Path | None = None
+    if not isinstance(evidence_root_value, str) or not evidence_root_value:
+        reasons.append("execution-tool provenance evidence_root must be a non-empty path")
+    else:
+        try:
+            evidence_root = Path(evidence_root_value).expanduser().resolve()
+        except (OSError, RuntimeError, ValueError) as exc:
+            reasons.append(
+                f"execution-tool provenance evidence_root cannot be resolved safely: {exc}"
+            )
+            evidence_root = None
+        if evidence_root is not None and not evidence_root.is_dir():
+            reasons.append(
+                f"execution-tool provenance evidence_root is missing: {evidence_root}"
+            )
+
+    source = require_exact_keys(
+        reasons,
+        "execution-tool source",
+        report.get("source"),
+        {
+            "repository",
+            "tag",
+            "tag_object",
+            "commit",
+            "tree",
+            "archive_url",
+            "archive",
+            "signing_key",
+            "git_object_status",
+            "git_signature_status",
+        },
+    )
+    source_records: dict[str, Any] = {}
+    if source is not None:
+        for field, expected in {
+            "repository": EXECUTION_HEIMDALL_REPOSITORY,
+            "tag": EXECUTION_HEIMDALL_TAG,
+            "tag_object": EXECUTION_HEIMDALL_TAG_OBJECT,
+            "commit": EXECUTION_HEIMDALL_COMMIT,
+            "tree": EXECUTION_HEIMDALL_TREE,
+            "archive_url": EXECUTION_HEIMDALL_ARCHIVE_URL,
+        }.items():
+            require_equal(reasons, f"execution-tool source {field}", source.get(field), expected)
+
+        archive_record = validate_bound_file(
+            reasons, "execution-tool source archive", evidence_root, source.get("archive")
+        )
+        if archive_record is not None:
+            source_records["archive"] = archive_record
+            require_equal(
+                reasons,
+                "execution-tool source archive SHA-256",
+                archive_record["sha256"],
+                EXECUTION_HEIMDALL_ARCHIVE_SHA256,
+            )
+
+        signing_key = require_exact_keys(
+            reasons,
+            "execution-tool signing key",
+            source.get("signing_key"),
+            {"path", "bytes", "sha256", "fingerprint"},
+        )
+        if signing_key is not None:
+            require_equal(
+                reasons,
+                "execution-tool signing-key fingerprint",
+                signing_key.get("fingerprint"),
+                EXECUTION_HEIMDALL_SIGNING_FINGERPRINT,
+            )
+            key_binding = {
+                field: signing_key.get(field) for field in ("path", "bytes", "sha256")
+            }
+            key_record = validate_bound_file(
+                reasons, "execution-tool signing key", evidence_root, key_binding
+            )
+            if key_record is not None:
+                source_records["signing_key"] = key_record
+
+        for name in ("git_object_status", "git_signature_status"):
+            record = validate_bound_file(
+                reasons,
+                f"execution-tool {name.replace('_', ' ')}",
+                evidence_root,
+                source.get(name),
+            )
+            if record is not None:
+                source_records[name] = record
+                text = read_bound_text(
+                    reasons,
+                    f"execution-tool {name.replace('_', ' ')}",
+                    record,
+                )
+                if text is None:
+                    continue
+                if name == "git_object_status":
+                    for marker in (
+                        EXECUTION_HEIMDALL_TAG_OBJECT,
+                        EXECUTION_HEIMDALL_COMMIT,
+                        EXECUTION_HEIMDALL_TREE,
+                    ):
+                        if marker not in text:
+                            reasons.append(
+                                f"execution-tool git object status lacks marker: {marker}"
+                            )
+                else:
+                    status_lines = [
+                        line
+                        for line in text.splitlines()
+                        if line.startswith("[GNUPG:] ")
+                    ]
+                    valid_signatures: list[tuple[str, str]] = []
+                    for line in status_lines:
+                        fields = line.split()
+                        if len(fields) >= 12 and fields[1] == "VALIDSIG":
+                            signing_fingerprint = fields[2].upper()
+                            primary_fingerprint = fields[-1].upper()
+                            valid_signatures.append(
+                                (signing_fingerprint, primary_fingerprint)
+                            )
+                    if len(valid_signatures) != 2:
+                        reasons.append(
+                            "execution-tool signature status must contain exactly "
+                            "two VALIDSIG records (tag and commit)"
+                        )
+                    if sum(
+                        line.startswith("[GNUPG:] GOODSIG ")
+                        for line in status_lines
+                    ) != 2:
+                        reasons.append(
+                            "execution-tool signature status must contain exactly "
+                            "two GOODSIG records (tag and commit)"
+                        )
+                    for signing_fingerprint, primary_fingerprint in valid_signatures:
+                        if EXECUTION_HEIMDALL_SIGNING_FINGERPRINT not in {
+                            signing_fingerprint,
+                            primary_fingerprint,
+                        }:
+                            reasons.append(
+                                "execution-tool VALIDSIG is not bound to the fixed "
+                                "primary fingerprint"
+                            )
+                    if not any(
+                        line.startswith("[GNUPG:] KEYEXPIRED ")
+                        for line in status_lines
+                    ):
+                        reasons.append(
+                            "execution-tool signature status must retain the observed "
+                            "KEYEXPIRED fact"
+                        )
+
+    build = require_exact_keys(
+        reasons,
+        "execution-tool build",
+        report.get("build"),
+        {
+            "host",
+            "patches",
+            "source_export",
+            "tree_manifest",
+            "cmake_argv",
+            "build_argv",
+            "environment",
+            "toolchain_manifest",
+            "dependency_manifest",
+            "build_log",
+        },
+    )
+    build_records: dict[str, Any] = {}
+    host: dict[str, Any] | None = None
+    if build is not None:
+        host = require_exact_keys(
+            reasons,
+            "execution-tool build host",
+            build.get("host"),
+            {"os", "architecture", "binary_format"},
+        )
+        if host is not None:
+            platform_formats = {
+                "linux": ("x86_64", "arm64", "ELF"),
+                "darwin": ("x86_64", "arm64", "Mach-O"),
+                "windows": ("x86_64", "arm64", "PE"),
+            }
+            host_os = host.get("os")
+            if host_os not in platform_formats:
+                reasons.append("execution-tool build host os is not supported")
+            else:
+                allowed = platform_formats[host_os]
+                if host.get("architecture") not in allowed[:2]:
+                    reasons.append("execution-tool build host architecture is not canonical")
+                require_equal(
+                    reasons,
+                    "execution-tool build host binary format",
+                    host.get("binary_format"),
+                    allowed[2],
+                )
+        require_equal(reasons, "execution-tool source patches", build.get("patches"), [])
+        for field in ("cmake_argv", "build_argv"):
+            argv = build.get(field)
+            if (
+                not isinstance(argv, list)
+                or not argv
+                or any(not isinstance(item, str) or not item for item in argv)
+            ):
+                reasons.append(f"execution-tool {field} must be a non-empty string array")
+            elif re.search(
+                r"(?:^|\s)(?:sudo|apt(?:-get)?|dnf|yum|pacman|brew|winget)(?:\s|$)",
+                " ".join(argv),
+                re.IGNORECASE,
+            ):
+                reasons.append(
+                    f"execution-tool {field} must only describe the offline build"
+                )
+        for name in (
+            "source_export",
+            "tree_manifest",
+            "environment",
+            "toolchain_manifest",
+            "dependency_manifest",
+            "build_log",
+        ):
+            record = validate_bound_file(
+                reasons,
+                f"execution-tool build {name.replace('_', ' ')}",
+                evidence_root,
+                build.get(name),
+            )
+            if record is not None:
+                build_records[name] = record
+
+    binary = require_exact_keys(
+        reasons,
+        "execution-tool binary",
+        report.get("binary"),
+        {"artifact", "format", "architecture", "version_output", "dynamic_dependencies"},
+    )
+    binary_record: dict[str, Any] | None = None
+    binary_records: dict[str, Any] = {}
+    if binary is not None:
+        binary_record = validate_bound_file(
+            reasons, "execution-tool binary artifact", evidence_root, binary.get("artifact")
+        )
+        if binary_record is not None:
+            binary_records["artifact"] = binary_record
+        for name in ("version_output", "dynamic_dependencies"):
+            record = validate_bound_file(
+                reasons,
+                f"execution-tool binary {name.replace('_', ' ')}",
+                evidence_root,
+                binary.get(name),
+            )
+            if record is not None:
+                binary_records[name] = record
+        if host is not None:
+            require_equal(
+                reasons,
+                "execution-tool binary format",
+                binary.get("format"),
+                host.get("binary_format"),
+            )
+            require_equal(
+                reasons,
+                "execution-tool binary architecture",
+                binary.get("architecture"),
+                host.get("architecture"),
+            )
+        version_record = binary_records.get("version_output")
+        if version_record is not None:
+            version_text = read_bound_text(
+                reasons, "execution-tool binary version output", version_record
+            )
+            if version_text is not None and not re.search(
+                r"(?:Heimdall\s+)?v2\.2\.2(?:\s|$)", version_text
+            ):
+                reasons.append("execution-tool version output lacks v2.2.2")
+
+    require_distinct_bound_files(
+        reasons,
+        "execution-tool provenance evidence",
+        {**source_records, **build_records, **binary_records},
+    )
+
+    signing_key_record = source_records.get("signing_key")
+    if reasons:
+        state = "fail"
+        status = "fail-execution-tool-provenance"
+    elif EXPECTED_EXECUTION_HEIMDALL_SIGNING_KEY_SHA256 is None:
+        state = "pending"
+        status = "pending-source-provenance"
+    elif (
+        signing_key_record is None
+        or signing_key_record["sha256"]
+        != EXPECTED_EXECUTION_HEIMDALL_SIGNING_KEY_SHA256
+    ):
+        state = "fail"
+        status = "fail-execution-tool-signing-key-review"
+        reasons.append("execution-tool signing key does not match the reviewed digest")
+    elif EXPECTED_EXECUTION_TOOL_BINARY_SHA256 is None:
+        state = "pending"
+        status = "pending-binary-review"
+    elif binary_record is None or binary_record["sha256"] != EXPECTED_EXECUTION_TOOL_BINARY_SHA256:
+        state = "fail"
+        status = "fail-execution-tool-binary-review"
+        reasons.append("execution-tool binary does not match the reviewed digest")
+    elif EXPECTED_EXECUTION_TOOL_PROVENANCE_REPORT_SHA256 is None:
+        state = "pending"
+        status = "pending-binary-review"
+    elif report_file["sha256"] != EXPECTED_EXECUTION_TOOL_PROVENANCE_REPORT_SHA256:
+        state = "fail"
+        status = "fail-execution-tool-provenance-review"
+        reasons.append("execution-tool provenance report does not match the reviewed digest")
+    elif not EXECUTION_TOOL_PASS_VALIDATION_IMPLEMENTED:
+        state = "pending"
+        status = "pending-validator-hardening"
+        reasons.append(
+            "execution-tool pass remains disabled until binary parsing, real "
+            "signature verification, source/build binding, and executor handoff "
+            "hardening are implemented and reviewed"
+        )
+    else:
+        state = "pass"
+        status = "pass-execution-tool-provenance"
+
+    return {
+        "state": state,
+        "status": status,
+        "path": str(report_path),
+        "report": report_file,
+        "binary": binary_record,
+        "host": host,
+        "source_records": source_records,
+        "build_records": build_records,
+        "binary_records": binary_records,
+        "reasons": reasons,
+        "trust_boundary": (
+            "This report contains locally reproducible source/build facts only. "
+            "It cannot self-declare signature validity, traceability, or execution approval."
+        ),
+    }
+
+
+def validate_execution_tool_liveness_report(
+    path: Path | None,
+    provenance_gate: dict[str, Any],
+) -> dict[str, Any]:
+    """Validate a separately authorized, read-only final-host liveness record."""
+
+    if path is None:
+        return {
+            "state": "pending",
+            "status": "pending-execution-tool-liveness",
+            "reasons": ["execution-tool liveness report was not supplied"],
+        }
+    reasons: list[str] = []
+    try:
+        report_path = path.expanduser().resolve()
+        report = load_json(report_path)
+        report_file = report_record(report_path)
+    except (OSError, RuntimeError, SystemExit, ValueError) as exc:
+        return {
+            "state": "fail",
+            "status": "fail-execution-tool-liveness",
+            "path": str(path),
+            "report": None,
+            "reasons": [str(exc)],
+        }
+
+    require_exact_keys(
+        reasons,
+        "execution-tool liveness report",
+        report,
+        {
+            "schema",
+            "report_type",
+            "device",
+            "model",
+            "evidence_root",
+            "provenance_report_sha256",
+            "binary",
+            "host",
+            "collection",
+            "usb",
+            "execution",
+            "files",
+            "host_partition_writes_performed",
+            "partition_uploads",
+            "pit_write_performed",
+            "repartition_performed",
+            "skip_size_check",
+            "device_writes_performed",
+            "deployable",
+            "explicit_device_write_authorization_recorded",
+        },
+    )
+    for field, expected in {
+        "schema": 1,
+        "report_type": "sm-t860-execution-tool-read-only-liveness",
+        "device": "samsung-gts6lwifi",
+        "model": "SM-T860",
+        "host_partition_writes_performed": False,
+        "partition_uploads": [],
+        "pit_write_performed": False,
+        "repartition_performed": False,
+        "skip_size_check": False,
+        "device_writes_performed": False,
+        "deployable": False,
+        "explicit_device_write_authorization_recorded": False,
+    }.items():
+        require_equal(reasons, f"execution-tool liveness {field}", report.get(field), expected)
+
+    evidence_root_value = report.get("evidence_root")
+    evidence_root: Path | None = None
+    if not isinstance(evidence_root_value, str) or not evidence_root_value:
+        reasons.append("execution-tool liveness evidence_root must be a non-empty path")
+    else:
+        try:
+            evidence_root = Path(evidence_root_value).expanduser().resolve()
+        except (OSError, RuntimeError, ValueError) as exc:
+            reasons.append(
+                f"execution-tool liveness evidence_root cannot be resolved safely: {exc}"
+            )
+            evidence_root = None
+        if evidence_root is not None and not evidence_root.is_dir():
+            reasons.append(
+                f"execution-tool liveness evidence_root is missing: {evidence_root}"
+            )
+
+    expected_provenance_report = provenance_gate.get("report")
+    provenance_binary = provenance_gate.get("binary")
+    provenance_host = provenance_gate.get("host")
+    provenance_facts_available = (
+        provenance_gate.get("state") != "fail"
+        and isinstance(expected_provenance_report, dict)
+        and isinstance(provenance_binary, dict)
+        and isinstance(provenance_host, dict)
+    )
+    expected_provenance_sha = (
+        expected_provenance_report.get("sha256")
+        if provenance_facts_available
+        else None
+    )
+    declared_provenance_sha = report.get("provenance_report_sha256")
+    if not valid_sha256(declared_provenance_sha):
+        reasons.append(
+            "execution-tool liveness provenance_report_sha256 must be a SHA-256"
+        )
+    elif provenance_facts_available:
+        require_equal(
+            reasons,
+            "execution-tool liveness provenance report SHA-256",
+            declared_provenance_sha,
+            expected_provenance_sha,
+        )
+
+    host = require_exact_keys(
+        reasons,
+        "execution-tool liveness host",
+        report.get("host"),
+        {"os", "architecture", "binary_format"},
+    )
+    if host is not None:
+        platform_formats = {
+            "linux": ("x86_64", "arm64", "ELF"),
+            "darwin": ("x86_64", "arm64", "Mach-O"),
+            "windows": ("x86_64", "arm64", "PE"),
+        }
+        host_os = host.get("os")
+        if host_os not in platform_formats:
+            reasons.append("execution-tool liveness host os is not supported")
+        else:
+            allowed = platform_formats[host_os]
+            if host.get("architecture") not in allowed[:2]:
+                reasons.append(
+                    "execution-tool liveness host architecture is not canonical"
+                )
+            require_equal(
+                reasons,
+                "execution-tool liveness host binary format",
+                host.get("binary_format"),
+                allowed[2],
+            )
+        if provenance_facts_available:
+            require_equal(reasons, "execution-tool final host", host, provenance_host)
+
+    binary_record = validate_bound_file(
+        reasons, "execution-tool liveness binary", evidence_root, report.get("binary")
+    )
+    if binary_record is not None and provenance_facts_available:
+        require_equal(
+            reasons,
+            "execution-tool liveness binary SHA-256",
+            binary_record.get("sha256"),
+            provenance_binary.get("sha256") if isinstance(provenance_binary, dict) else None,
+        )
+
+    collection = require_exact_keys(
+        reasons,
+        "execution-tool liveness collection",
+        report.get("collection"),
+        {"started_at_utc", "completed_at_utc"},
+    )
+    collection_start: datetime | None = None
+    collection_end: datetime | None = None
+    if collection is not None:
+        for field in ("started_at_utc", "completed_at_utc"):
+            value = collection.get(field)
+            if not isinstance(value, str):
+                reasons.append(f"execution-tool liveness collection lacks {field}")
+                continue
+            try:
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                reasons.append(f"execution-tool liveness {field} is not ISO 8601")
+                continue
+            if parsed.tzinfo is None:
+                reasons.append(f"execution-tool liveness {field} lacks a timezone")
+                continue
+            if field == "started_at_utc":
+                collection_start = parsed.astimezone(timezone.utc)
+            else:
+                collection_end = parsed.astimezone(timezone.utc)
+        if collection_start is not None and collection_end is not None:
+            if collection_end < collection_start:
+                reasons.append("execution-tool liveness collection window is reversed")
+            elif collection_end - collection_start > timedelta(minutes=15):
+                reasons.append("execution-tool liveness collection window exceeds 15 minutes")
+
+    usb = require_exact_keys(
+        reasons,
+        "execution-tool liveness usb",
+        report.get("usb"),
+        {"vid_pid", "before", "after"},
+    )
+    usb_records: dict[str, Any] = {}
+    if usb is not None:
+        require_equal(reasons, "execution-tool liveness USB VID:PID", usb.get("vid_pid"), "04e8:685d")
+        for phase in ("before", "after"):
+            record = validate_bound_file(
+                reasons,
+                f"execution-tool liveness USB {phase}",
+                evidence_root,
+                usb.get(phase),
+            )
+            if record is not None:
+                usb_records[phase] = record
+                text = read_bound_text(
+                    reasons, f"execution-tool liveness USB {phase}", record
+                )
+                if text is None:
+                    continue
+                exact_lines = {line.strip() for line in text.splitlines()}
+                for marker in ("USB_DEVICE_COUNT:1", "USB_VID_PID:04e8:685d"):
+                    if marker not in exact_lines:
+                        reasons.append(
+                            f"execution-tool liveness USB {phase} lacks marker: {marker}"
+                        )
+
+    files = require_exact_keys(
+        reasons,
+        "execution-tool liveness files",
+        report.get("files"),
+        {"stdout", "stderr", "pit", "stock_pit", "pit_comparison", "environment"},
+    )
+    file_records: dict[str, Any] = {}
+    if files is not None:
+        for name in files:
+            record = validate_bound_file(
+                reasons,
+                f"execution-tool liveness {name.replace('_', ' ')}",
+                evidence_root,
+                files.get(name),
+            )
+            if record is not None:
+                file_records[name] = record
+
+    require_distinct_bound_files(
+        reasons,
+        "execution-tool liveness evidence",
+        {**usb_records, **file_records},
+    )
+
+    current_pit_record = file_records.get("pit")
+    stock_pit_record = file_records.get("stock_pit")
+    current_pit_path = Path(current_pit_record["path"]) if current_pit_record else None
+    stock_pit_path = Path(stock_pit_record["path"]) if stock_pit_record else None
+    if stock_pit_record is not None:
+        require_equal(
+            reasons,
+            "execution-tool liveness stock PIT SHA-256",
+            stock_pit_record["sha256"],
+            STOCK_CRITICAL["GTS6LWIFI_EUR_OPEN.pit"]["sha256"],
+        )
+    if current_pit_path is not None and stock_pit_path is not None:
+        if current_pit_path == stock_pit_path:
+            reasons.append("execution-tool liveness PIT must differ from stock PIT")
+        else:
+            current_stat = stat_bound_file(
+                reasons, "execution-tool liveness PIT", current_pit_record
+            )
+            stock_stat = stat_bound_file(
+                reasons, "execution-tool liveness stock PIT", stock_pit_record
+            )
+            if (
+                current_stat is not None
+                and stock_stat is not None
+                and current_stat.st_dev == stock_stat.st_dev
+                and current_stat.st_ino == stock_stat.st_ino
+            ):
+                reasons.append("execution-tool liveness PIT must use an independent inode")
+            current_pit_data = read_bound_bytes(
+                reasons, "execution-tool liveness PIT", current_pit_record
+            )
+            stock_pit_data = read_bound_bytes(
+                reasons, "execution-tool liveness stock PIT", stock_pit_record
+            )
+            if current_pit_data is not None and stock_pit_data is not None:
+                current_structure = pit_structure_record(current_pit_data)
+                stock_structure = pit_structure_record(stock_pit_data)
+                for field, expected in {
+                    "magic": "0x12349876",
+                    "entry_count": 76,
+                    "header": "COM_TAR2",
+                    "cpu_bootloader_tag": "SM8150",
+                    "logic_unit_count": 4,
+                    "entries_parsed": 76,
+                }.items():
+                    require_equal(
+                        reasons,
+                        f"execution-tool liveness PIT {field}",
+                        current_structure.get(field),
+                        expected,
+                    )
+                require_equal(
+                    reasons,
+                    "execution-tool liveness PIT partition layout",
+                    current_structure.get("entries"),
+                    stock_structure.get("entries"),
+                )
+
+    execution = require_exact_keys(
+        reasons,
+        "execution-tool liveness execution",
+        report.get("execution"),
+        {
+            "binary_argv",
+            "launcher_argv",
+            "watchdog_argv",
+            "exit_code",
+            "timed_out",
+            "attempt_count",
+            "output_preexisted",
+            "automatic_retry",
+            "automatic_reboot",
+        },
+    )
+    if execution is not None:
+        binary_path = Path(binary_record["path"]) if binary_record is not None else None
+        expected_binary_argv = (
+            [
+                str(binary_path),
+                "download-pit",
+                "--output",
+                str(current_pit_path),
+                "--no-reboot",
+                "--stdout-errors",
+            ]
+            if binary_path is not None and current_pit_path is not None
+            else None
+        )
+        require_equal(
+            reasons,
+            "execution-tool liveness binary argv",
+            execution.get("binary_argv"),
+            expected_binary_argv,
+        )
+        for field in ("launcher_argv", "watchdog_argv"):
+            argv = execution.get(field)
+            if (
+                not isinstance(argv, list)
+                or not argv
+                or any(not isinstance(item, str) or not item for item in argv)
+            ):
+                reasons.append(f"execution-tool liveness {field} must be a non-empty string array")
+            elif expected_binary_argv is not None and not any(
+                argv[index : index + len(expected_binary_argv)] == expected_binary_argv
+                for index in range(len(argv) - len(expected_binary_argv) + 1)
+            ):
+                reasons.append(f"execution-tool liveness {field} does not bind exact binary argv")
+        for field, expected in {
+            "exit_code": 0,
+            "timed_out": False,
+            "attempt_count": 1,
+            "output_preexisted": False,
+            "automatic_retry": False,
+            "automatic_reboot": False,
+        }.items():
+            require_equal(reasons, f"execution-tool liveness {field}", execution.get(field), expected)
+        argv_text = json.dumps(execution, ensure_ascii=False)
+        if re.search(r"(?:--wait|--resume|--repartition|--skip-size-check|\bflash\b|\bupload\b)", argv_text, re.IGNORECASE):
+            reasons.append("execution-tool liveness argv contains a forbidden action or flag")
+
+    output_text = ""
+    for name in ("stdout", "stderr"):
+        record = file_records.get(name)
+        if record is not None:
+            text = read_bound_text(
+                reasons, f"execution-tool liveness {name}", record
+            )
+            if text is not None:
+                output_text += text
+    if re.search(
+        r"Uploading\s|upload successful|(?:^|\s)(?:flash|--repartition|--skip-size-check)(?:\s|=|$)|Repartition\s",
+        output_text,
+        re.IGNORECASE | re.MULTILINE,
+    ):
+        reasons.append("execution-tool liveness output contains a write/repartition marker")
+    for marker in ("Session begun.", "PIT file download successful."):
+        if marker not in {line.strip() for line in output_text.splitlines()}:
+            reasons.append(
+                f"execution-tool liveness output lacks success marker: {marker}"
+            )
+    environment_record = file_records.get("environment")
+    if environment_record is not None:
+        environment_text = read_bound_text(
+            reasons, "execution-tool liveness environment", environment_record
+        )
+        if environment_text is not None and re.search(
+            r"^(?:LD_|DYLD_)[^=]*=", environment_text, re.MULTILINE
+        ):
+            reasons.append("execution-tool liveness environment contains dynamic-loader injection variables")
+
+    if collection_start is not None and collection_end is not None:
+        for label, record in {
+            **usb_records,
+            **file_records,
+        }.items():
+            stat = stat_bound_file(
+                reasons, f"execution-tool liveness {label}", record
+            )
+            if stat is None:
+                continue
+            mtime = datetime.fromtimestamp(stat.st_mtime, timezone.utc)
+            if not (
+                collection_start - timedelta(seconds=5)
+                <= mtime
+                <= collection_end + timedelta(seconds=5)
+            ):
+                reasons.append(f"execution-tool liveness {label} mtime is outside collection window")
+
+    if reasons:
+        state = "fail"
+        status = "fail-execution-tool-liveness"
+    elif provenance_gate.get("state") != "pass":
+        state = "pending"
+        status = provenance_gate.get("status", "pending-source-provenance")
+        reasons.append(
+            "execution-tool liveness is structurally valid but cannot be reviewed "
+            "before provenance and the exact binary pass independent review"
+        )
+    elif EXPECTED_EXECUTION_TOOL_LIVENESS_REPORT_SHA256 is None:
+        state = "pending"
+        status = "pending-liveness-review"
+    elif report_file["sha256"] != EXPECTED_EXECUTION_TOOL_LIVENESS_REPORT_SHA256:
+        state = "fail"
+        status = "fail-execution-tool-liveness-review"
+        reasons.append("execution-tool liveness report does not match the reviewed digest")
+    else:
+        state = "pass"
+        status = "pass-execution-tool-liveness"
+
+    return {
+        "state": state,
+        "status": status,
+        "path": str(report_path),
+        "report": report_file,
+        "binary": binary_record,
+        "host": host,
+        "usb_records": usb_records,
+        "file_records": file_records,
+        "reasons": reasons,
+        "trust_boundary": (
+            "This is a read-only download-pit liveness record for one exact host "
+            "binary. It is not a flash test, deployment proof, or write authorization."
+        ),
+    }
+
+
+def validate_execution_tool_gate(
+    provenance_path: Path | None, liveness_path: Path | None
+) -> dict[str, Any]:
+    provenance_gate = validate_execution_tool_provenance_report(provenance_path)
+    liveness_gate = validate_execution_tool_liveness_report(
+        liveness_path, provenance_gate
+    )
+    if provenance_gate.get("state") == "fail" or liveness_gate.get("state") == "fail":
+        state = "fail"
+        status = "fail-traceable-execution-transport"
+    elif provenance_gate.get("state") == "pass" and liveness_gate.get("state") == "pass":
+        state = "pass"
+        status = "pass-traceable-execution-transport"
+    else:
+        state = "pending"
+        status = (
+            provenance_gate.get("status")
+            if provenance_gate.get("state") != "pass"
+            else liveness_gate.get("status")
+        )
+    return {
+        "state": state,
+        "status": status,
+        "binary": liveness_gate.get("binary") if state == "pass" else None,
+        "candidate_binary": provenance_gate.get("binary"),
+        "host": provenance_gate.get("host"),
+        "provenance": provenance_gate,
+        "liveness": liveness_gate,
+        "reasons": provenance_gate.get("reasons", []) + liveness_gate.get("reasons", []),
+        "trust_boundary": (
+            "Historical Heimdall 2.0.2 evidence is never promoted into this gate. "
+            "Only a reviewed source build and a new same-binary final-host liveness can pass."
+        ),
+    }
 
 
 def validate_recovery_trigger_report(
@@ -2257,6 +3308,7 @@ def validate_action_plan(
     windows_gate: dict[str, Any],
     stock_gate: dict[str, Any],
     transport_gate: dict[str, Any],
+    execution_tool_gate: dict[str, Any],
     trigger_gate: dict[str, Any],
 ) -> dict[str, Any]:
     if path is None:
@@ -2293,15 +3345,11 @@ def validate_action_plan(
         "Windows media": windows_gate,
         "stock recovery": stock_gate,
         "recovery transport": transport_gate,
+        "traceable execution tool": execution_tool_gate,
         "Recovery boot trigger": trigger_gate,
     }.items():
         if gate.get("state") != "pass":
             reasons.append(f"action plan cannot pass before {dependency} gate passes")
-    if transport_gate.get("tool_source_traceable") is not True:
-        reasons.append(
-            "action plan cannot pass until the execution transport tool is built "
-            "from a pinned, traceable source"
-        )
     for field, expected in {
         "schema": 2,
         "report_type": "sm-t860-first-boot-action-plan",
@@ -2343,12 +3391,24 @@ def validate_action_plan(
     evidence_reports = report.get("evidence_reports")
     if all(
         gate.get("state") == "pass"
-        for gate in (windows_gate, stock_gate, transport_gate, trigger_gate)
+        for gate in (
+            windows_gate,
+            stock_gate,
+            transport_gate,
+            execution_tool_gate,
+            trigger_gate,
+        )
     ):
         expected_reports = {
             "windows_media_sha256": windows_gate["report"]["sha256"],
             "stock_recovery_sha256": stock_gate["report"]["sha256"],
             "recovery_transport_sha256": transport_gate["report"]["sha256"],
+            "execution_tool_provenance_sha256": execution_tool_gate["provenance"][
+                "report"
+            ]["sha256"],
+            "execution_tool_liveness_sha256": execution_tool_gate["liveness"][
+                "report"
+            ]["sha256"],
             "recovery_trigger_sha256": trigger_gate["report"]["sha256"],
         }
         require_equal(
@@ -2447,9 +3507,13 @@ def validate_action_plan(
         if set(execution) != allowed_execution_keys:
             reasons.append("action plan execution keys do not match the fixed schema")
         heimdall_path = None
-        transport_tool = transport_gate.get("tool")
-        if isinstance(transport_tool, dict) and transport_tool.get("path"):
-            heimdall_path = str(Path(transport_tool["path"]).resolve())
+        execution_tool = execution_tool_gate.get("binary")
+        if (
+            execution_tool_gate.get("state") == "pass"
+            and isinstance(execution_tool, dict)
+            and execution_tool.get("path")
+        ):
+            heimdall_path = str(Path(execution_tool["path"]).resolve())
         current_image_path = str(Path(artifacts["boot_image"]["path"]).resolve())
         stock_recovery_record = stock_gate.get("critical_artifacts", {}).get(
             "recovery.img"
@@ -2581,6 +3645,22 @@ parser.add_argument(
     ),
 )
 parser.add_argument(
+    "--execution-tool-provenance-report",
+    type=Path,
+    help=(
+        "Strict facts-only SourceHut v2.2.2 source/build/binary report; "
+        "a candidate cannot self-approve its key, binary, or report digest"
+    ),
+)
+parser.add_argument(
+    "--execution-tool-liveness-report",
+    type=Path,
+    help=(
+        "Separately authorized final-host read-only download-pit evidence for "
+        "the exact execution binary; no report digest is currently accepted"
+    ),
+)
+parser.add_argument(
     "--action-plan",
     type=Path,
     help="Independently reviewed exact-image/partition/rollback plan; never generated here",
@@ -2612,6 +3692,10 @@ stock_gate = validate_stock_recovery(
     args.stock_recovery_report, args.stock_critical_dir
 )
 transport_gate = validate_transport_report(args.recovery_transport_report)
+execution_tool_gate = validate_execution_tool_gate(
+    args.execution_tool_provenance_report,
+    args.execution_tool_liveness_report,
+)
 trigger_gate = validate_recovery_trigger_report(
     args.recovery_trigger_report, transport_gate
 )
@@ -2621,12 +3705,14 @@ action_plan_gate = validate_action_plan(
     windows_gate,
     stock_gate,
     transport_gate,
+    execution_tool_gate,
     trigger_gate,
 )
 external_gates = {
     "windows_media": windows_gate,
     "stock_recovery": stock_gate,
     "recovery_transport": transport_gate,
+    "execution_tool": execution_tool_gate,
     "recovery_boot_trigger": trigger_gate,
     "exact_action_plan": action_plan_gate,
 }

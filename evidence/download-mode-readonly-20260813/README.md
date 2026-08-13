@@ -49,6 +49,11 @@ write. `RECOVERY_BOOT_TRIGGER_VALIDATED` remains `false`, so the aggregate
 result remains `blocked-first-boot-execution`, `execution_prerequisites_ready:
 false`, and `deployable: false`.
 
+This evidence is permanently scoped to the historical, untraceable Heimdall
+2.0.2 binary recorded by transport schema 2. It does not establish provenance
+or liveness for the separate SourceHut v2.2.2 execution-tool candidate, and it
+must not be rewritten to claim that it does.
+
 ## Files
 
 - The exact `current-session.pit` remains local at

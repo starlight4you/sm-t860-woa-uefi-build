@@ -45,7 +45,7 @@ python3 implementation/uefi/validate-first-boot.py
 - `exact_current_image_hardware_tested: false`
 - `recovery_boot_trigger_validated: false`
 - `execution_status: blocked-first-boot-execution`
-- Windows 介质、原厂恢复、当前会话恢复传输、Recovery 触发和精确动作计划五项为 `pending`
+- Windows 介质、原厂恢复、当前会话历史工具恢复传输、新 execution tool、Recovery 触发和精确动作计划六项为 `pending`
 - `external_evidence_trust: local-self-attested-not-execution-authority`
 - `deployable: false`
 - `explicit_device_write_authorization_recorded: false`
@@ -61,8 +61,11 @@ python3 implementation/uefi/validate-first-boot.py
 - DWH1 原厂 ZIP、四个 tar.md5 成员和本地五个 critical 文件，并直接记录原厂 boot/recovery 容器结构；
 - 同机历史 transport 的 Heimdall 二进制、PIT/上传日志、后续 Android 启动、TWRP readback、TWRP 镜像结构与 ABL 解锁日志；
 - 当前会话的只读 Download Mode 日志。这一项与历史证据分层，不会被历史成功自动放行。
+- 未来 execution tool 的独立 provenance/liveness：provenance 只接收可复算的源码、签名原始输出、构建和二进制事实；liveness 必须由最终宿主用完全相同的 binary SHA-256 重新采集。两者都不复用 Heimdall 2.0.2 历史演练。
 
 这些本地 JSON、日志与文件哈希用于发现过期产物、错盘、错架构和不完整检查，属于可复核但可由本机管理员改写的自证材料，不是可信执行证明、签名证明或授权载体。聚合器因此不会仅凭这些材料把本项目提升为可执行状态。
+
+`--execution-tool-provenance-report` 和 `--execution-tool-liveness-report` 当前只是严格 collector schema；本仓库没有会操作 USB 的 collector，也没有自动安装依赖或运行 Heimdall 的 builder。离线构建器若后续加入，只能导出源码、构建并采集原始事实，不能产生 pass。实际 executor 还必须避免 pathname 校验后替换的 TOCTOU：应以已打开的只读文件描述符或受控不可变 staging 运行刚复核的 binary，并清理 `LD_*`/`DYLD_*` 等动态加载注入变量；validator 本身不会执行它。
 
 ## 实机执行前的全部门槛
 
@@ -89,8 +92,10 @@ python3 implementation/uefi/validate-first-boot.py
 2. 用 `--stock-recovery-report` 提供 DWH1 本地报告。聚合器重新散列 6.7 GB ZIP 和 `boot.img`、`recovery.img`、`dtbo.img`、`vbmeta.img`、PIT。PIT 只用于分区映射与容量核对，不得刷写或重分区。
 3. 只有单独获得“进入 Download Mode/重启”授权后，才可运行当前会话的只识别、不刷写 drill。未运行时 `current_session.state` 必须是 `not-run`，`flash_attempted` 和 `device_writes_performed` 必须是 `null`，总门禁保持 `pending-current-session-read-only-download-mode-drill`。完成态必须把 `command_argv` 精确绑定到固定 Heimdall 二进制、`download-pit`、唯一输出路径和只读参数；同时绑定当次日志与独立 inode 的 `current-session.pit`，重算 SHA-256，验证 `COM_TAR2`/`SM8150`/76 项结构与固定原厂 PIT 分区布局一致，且日志无上传/flash/重分区标记，才可进入 `pass-recovery-transport-drill`。
 4. 前三项通过后，仍需先建立并单独复核“从 `EndSession(false)` 后的 Download Mode 让这台单槽设备可靠进入 `RECOVERY`”的精确触发方式。`heimdall close-pc-screen --resume` 只保证退出 PC screen/重启，不能证明进入 Recovery；手写 reviewer、时间或命令字符串也不能补足这个缺口。当前独立 `recovery_boot_trigger` 门禁没有任何已固定的可接受报告 SHA-256，缺失为 `pending`、任意自填报告为 `fail`，不存在可以直接翻转的布尔开关。候选按键状态机和未来无主机分区写入演练边界见 [RECOVERY-TRIGGER-DRILL.md](RECOVERY-TRIGGER-DRILL.md)。未来若有实机证据，必须通过新的代码审查固定报告哈希，再绑定四份外部报告、`.img/.fd/AML` 哈希、唯一目标分区 `RECOVERY`、原厂 `recovery.img` 回退镜像和机器可读停止条件。
-5. 当前历史 Heimdall 二进制来源不可追溯，只能用于已有证据和只读研究；动作计划会拒绝把它提升为未来写入工具。执行前还必须从固定、可核验源码构建 transport 工具，并重新完成只读 liveness 复核。
-6. 因此当前即使其余外部报告在结构上全部通过，`execution_prerequisites_ready` 仍硬性保持 `false`，`execution_status` 保持 `blocked-first-boot-execution`。未来完成触发路径与可追溯工具链的独立代码审查后，状态最多只能变为 `awaiting-explicit-device-write-authorization`；用户仍须针对精确镜像、分区、命令和恢复路线另行明确授权。JSON、静态 pass 和“继续”都不能代替该授权。
+5. 当前历史 Heimdall 2.0.2 二进制来源不可追溯，只能用于已有 schema 2 证据和只读研究；动作计划不再读取该 gate 的工具路径。新的 `execution_tool` 外部门禁固定到 SourceHut `v2.2.2`：tag object `2316fe346fece34726619498f34446b6d3df7c3a`、commit `d9554e7fa30a00abed7f0ac86b10e63c2c3b8e20`、tree `5ea9109a5005fbdc075443ebe16955b87d002ed5`、archive SHA-256 `7d01dd8bf9c2f93ea016ae8b059110c50cea49e78670e8a1333ebd5899cdaaa3`、签名 key fingerprint `2C7F29AE97891F6419A9E2CDB0076E490B71616B`。报告不得包含 `signature_valid`、`source_verified`、`tool_source_traceable` 等自报结论；validator 只接受逐层 exact-key 的事实和本地重算文件记录。
+6. 当前固定公钥文件、最终 binary、provenance report 和 liveness report 的预期 SHA-256 均为 `None`，而且 `EXECUTION_TOOL_PASS_VALIDATION_IMPLEMENTED` 固定为 `False`。因此缺 provenance 为 `pending-source-provenance`；来源事实成立但尚未固定公钥/binary 为 `pending-source-provenance` 或 `pending-binary-review`；同一 binary 尚未在最终宿主复核为 `pending-execution-tool-liveness`；即使未来四个哈希都已完成独立审查，当前实现仍只能到 `pending-validator-hardening`。不得仅填哈希或翻转该常量来获得 pass；在可能启用 `pass-traceable-execution-transport` 前，必须先由代码直接解析实际 Mach-O/ELF/PE 与架构、固定并核验 libusb 等动态依赖、执行真实的 tag/commit 签名验证、建立固定源码到构建产物的关系、把 collector/watchdog 收紧为完整 exact-array allowlist，并由最终 executor 以无 symlink 的不可变 staging 或已打开文件描述符消除路径 TOCTOU。Linux x86_64 build 只是 Linux 候选，不能替代 macOS ARM64 或其他最终宿主。
+7. Heimdall v2.2.2 的 `download-pit --wait` 语义存在已知反转；未来 collector 必须先外部确认唯一 `04e8:685d`、不传 `--wait`/`--resume`，使用外部 watchdog、全新不存在的 PIT 路径、单次尝试，并记录无 `LD_*`/`DYLD_*` 注入的环境。liveness 仍会 claim/reset USB、BeginSession/EndSession；“只读”只表示没有主机请求分区写入，并不表示设备状态绝对不变。任何现场采集仍须单独授权。
+8. 因此当前即使其余外部报告在结构上全部通过，`execution_prerequisites_ready` 仍硬性保持 `false`，`execution_status` 保持 `blocked-first-boot-execution`。未来完成触发路径与可追溯工具链的独立代码审查后，状态最多只能变为 `awaiting-explicit-device-write-authorization`；用户仍须针对精确镜像、分区、命令和恢复路线另行明确授权。JSON、静态 pass 和“继续”都不能代替该授权。
 
 `deployable`、`device_writes_performed` 和 `explicit_device_write_authorization_recorded` 在聚合结果中始终为 `false`。
 
@@ -101,6 +106,8 @@ python3 implementation/uefi/validate-first-boot.py \
   --windows-media-report /path/to/windows-media-validation.json \
   --stock-recovery-report /path/to/SM-T860-XAR-DWH1/validation.json \
   --recovery-transport-report /path/to/recovery-transport-evidence.json \
+  --execution-tool-provenance-report /path/to/execution-tool-provenance.json \
+  --execution-tool-liveness-report /path/to/execution-tool-liveness.json \
   --recovery-trigger-report /path/to/reviewed-recovery-trigger-report.json \
   --action-plan /path/to/reviewed-first-boot-action-plan.json
 ```
