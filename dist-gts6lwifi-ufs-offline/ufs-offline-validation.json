@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "validated_at_utc": "2026-08-12T23:44:11.303934+00:00",
+  "validated_at_utc": "2026-08-13T00:26:39.144727+00:00",
   "device": "samsung-gts6lwifi",
   "profile": "ufs-offline",
   "status": "pass-ufs-offline-uefi-build",
@@ -17,7 +17,7 @@
   "firmware": {
     "path": "implementation/build/uefi/gts6lwifi-ufs-offline.fd",
     "bytes": 3145728,
-    "sha256": "b86c695a34ceeb540840be71fc53087c82d9bf86c0a18e981b38d19cea3c24e5",
+    "sha256": "c08f5ef09c6674884f9833abe197ddbb00248b861c20e636f96d442ec135c89b",
     "embedded_aml_occurrences": 1
   },
   "firmware_driver_inventory": {
@@ -30,7 +30,7 @@
   "boot_image": {
     "path": "implementation/build/uefi/gts6lwifi-ufs-offline.img",
     "bytes": 3837952,
-    "sha256": "ec672cf48f7ac67b27644249b79d9884c4c2a8dfa3a1c9e171e744068fdfdb21",
+    "sha256": "09043c50d3f6b46806ce6b26693cd6c4a010f37888d50bb69297711f55c6ceba",
     "embedded_aml_occurrences": 1,
     "embedded_exact_firmware_occurrences": 1
   }

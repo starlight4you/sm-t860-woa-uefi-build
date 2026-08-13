@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "profile": "gts6lwifi-ufs-offline",
-  "source_tree": "/tmp/t860-uefi-build.ICMV40/mu_aloha_platforms",
+  "source_tree": "/tmp/t860-uefi-build.o2gtHq/mu_aloha_platforms",
   "files": {
     "APRIORI.inc": {
       "active_ufs_before": 1,
@@ -18,6 +18,14 @@
       "active_ufs_after": 0,
       "active_sdcc_after": 1
     }
+  },
+  "firmware_layout": {
+    "fdf": "Platforms/SurfaceDuo1Pkg/SurfaceDuo1.fdf",
+    "acpi_source_fv": "FVMAIN",
+    "acpi_target_fv": "FVMAIN_COMPACT",
+    "acpi_outer_fv_uncompressed": true,
+    "bootpack": "Platforms/SurfaceDuo1Pkg/Device/samsung-gts6lwifi/bootpack.json",
+    "kernel_compressed": false
   },
   "status": "pass-ufs-offline-source-preparation"
 }
