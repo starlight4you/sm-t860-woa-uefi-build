@@ -126,6 +126,56 @@ def reject_symlink_components(path: Path, label: str) -> None:
             fail(f"{label} path contains a symbolic-link component: {component}")
 
 
+def paths_overlap(first: Path, second: Path) -> bool:
+    """Return whether two normalized paths are equal or contain one another."""
+
+    return first == second or first in second.parents or second in first.parents
+
+
+def directory_is_same_or_below(candidate: Path, ancestor: Path) -> bool:
+    """Compare existing directory ancestry by identity, including path aliases."""
+
+    try:
+        ancestor_item = ancestor.stat()
+        if not stat.S_ISDIR(ancestor_item.st_mode):
+            fail(f"input root is not a directory: {ancestor}")
+        ancestor_identity = (ancestor_item.st_dev, ancestor_item.st_ino)
+        for current in (candidate, *candidate.parents):
+            item = current.stat()
+            if (item.st_dev, item.st_ino) == ancestor_identity:
+                return True
+    except OSError as exc:
+        fail(f"cannot establish input/output path separation: {exc}")
+    return False
+
+
+def reject_output_input_overlap(
+    output_root: Path, source_git: Path, raw_inputs: dict[str, Path]
+) -> None:
+    """Reject output paths that could overwrite or be traversed as input."""
+
+    if paths_overlap(output_root, source_git) or directory_is_same_or_below(
+        output_root.parent, source_git
+    ):
+        fail(
+            "output root overlaps git source; choose a disjoint path: "
+            f"{output_root} and {source_git}"
+        )
+    for name, raw_path in raw_inputs.items():
+        candidate = raw_path.expanduser().absolute()
+        label = name.replace("_", " ")
+        reject_symlink_components(candidate, label)
+        try:
+            resolved = candidate.resolve(strict=True)
+        except OSError as exc:
+            fail(f"cannot resolve {label}: {exc}")
+        if paths_overlap(output_root, resolved):
+            fail(
+                f"output root overlaps {label}; choose a disjoint path: "
+                f"{output_root} and {resolved}"
+            )
+
+
 def read_stable_input(path: Path, label: str) -> bytes:
     descriptor: int | None = None
     try:
@@ -815,6 +865,15 @@ def stage_git_source(
 ) -> tuple[Path, dict[str, Any]]:
     """Snapshot a standalone Git work tree without following directory entries."""
 
+    # Keep this function safe if it is reused without main's preflight.  The
+    # caller supplies normalized paths whose parents already exist.
+    if paths_overlap(destination, source) or directory_is_same_or_below(
+        destination.parent, source
+    ):
+        fail(
+            "Git staging destination overlaps source; choose a disjoint path: "
+            f"{destination} and {source}"
+        )
     destination.mkdir(mode=0o700)
     seen: dict[tuple[int, int], str] = {}
     rows: list[str] = []
@@ -920,6 +979,7 @@ def main() -> int:
     reject_symlink_components(output_root.parent, "output parent")
     output_parent = output_root.parent.resolve(strict=True)
     output_root = output_parent / output_root.name
+    reject_output_input_overlap(output_root, source_git_input, raw_inputs)
 
     # The absent private root is the trust boundary. Every file input is read
     # once from one O_NOFOLLOW descriptor, then all validation uses the staged

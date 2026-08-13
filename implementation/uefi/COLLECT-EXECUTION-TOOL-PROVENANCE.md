@@ -46,6 +46,11 @@ python3 implementation/uefi/collect-execution-tool-provenance.py \
   --output-root /LOCAL_ONLY/execution-tool-provenance
 ```
 
+The output root must be disjoint from the Git source tree and every explicit
+evidence path. The collector resolves and checks those relationships before
+creating the output root; in particular, an output equal to or nested anywhere
+inside `--source-git` is rejected without starting staging.
+
 The output has exactly 13 distinct single-link records plus
 `execution-tool-provenance.json`. Additional unbound `LOCAL_ONLY-*` entries are
 private input snapshots, an empty Git home, and a path/hash manifest; they are
@@ -58,8 +63,17 @@ replace/alternates/promisor/partial-clone repository state. The collector fails
 closed for an existing output root, symlink path components, hard-linked inputs
 or outputs, object/tree or archive-content mismatch, dirty/shallow Git source,
 wrong source/key/binary hashes, wrong Mach-O architecture/load allowlist, or a
-binary/libusb dependency mismatch. A failed run is retained as a partial
+binary/libusb dependency mismatch. Preflight path failures create no output.
+After the private root is created, a failed run is retained as a partial
 diagnostic directory; the collector never deletes or reuses it.
+
+Path-separation negative tests are pure host-filesystem tests and do not run
+Heimdall or access USB:
+
+```sh
+python3 -m unittest -v \
+  implementation/uefi/test_collect_execution_tool_provenance.py
+```
 
 Feed the resulting JSON to the aggregate validator with
 `--execution-tool-provenance-report`. A structurally valid report still yields
