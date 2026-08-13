@@ -45,7 +45,7 @@ python3 implementation/uefi/validate-first-boot.py
 - `exact_current_image_hardware_tested: false`
 - `recovery_boot_trigger_validated: false`
 - `execution_status: blocked-first-boot-execution`
-- Windows 介质、原厂恢复、当前会话恢复传输和精确动作计划四项为 `pending`
+- Windows 介质、原厂恢复、当前会话恢复传输、Recovery 触发和精确动作计划五项为 `pending`
 - `external_evidence_trust: local-self-attested-not-execution-authority`
 - `deployable: false`
 - `explicit_device_write_authorization_recorded: false`
@@ -82,14 +82,15 @@ python3 implementation/uefi/validate-first-boot.py
 [`evidence/download-mode-readonly-20260813/`](evidence/download-mode-readonly-20260813/)。
 严格 transport gate 现可记为 `pass-recovery-transport-drill`；但本地报告仍
 属于自证材料，Windows 介质门禁仍未提供，而且精确 Recovery 首启触发仍
-未建立。因此 `RECOVERY_BOOT_TRIGGER_VALIDATED=false`、
+未建立。因此 `recovery_boot_trigger_validated=false`、
 `execution_prerequisites_ready=false` 和 `deployable=false` 均不改变。
 
 1. 在 Windows 主机用固定 `validate-windows-media.ps1` 只读检查实际 Windows 分区和 ESP。报告必须证明两分区位于同一 GPT 可移除物理盘，整盘及其任一分区都不是 host boot/system；且 ARM64 PE、三份 EFI 哈希一致性、QCOM2466 映射、同一 sdbus manifest 中的 descriptor/BootFlags、sdstor BootFlags 和绑定实际盘符的 BCD 语义都通过。
 2. 用 `--stock-recovery-report` 提供 DWH1 本地报告。聚合器重新散列 6.7 GB ZIP 和 `boot.img`、`recovery.img`、`dtbo.img`、`vbmeta.img`、PIT。PIT 只用于分区映射与容量核对，不得刷写或重分区。
 3. 只有单独获得“进入 Download Mode/重启”授权后，才可运行当前会话的只识别、不刷写 drill。未运行时 `current_session.state` 必须是 `not-run`，`flash_attempted` 和 `device_writes_performed` 必须是 `null`，总门禁保持 `pending-current-session-read-only-download-mode-drill`。完成态必须把 `command_argv` 精确绑定到固定 Heimdall 二进制、`download-pit`、唯一输出路径和只读参数；同时绑定当次日志与独立 inode 的 `current-session.pit`，重算 SHA-256，验证 `COM_TAR2`/`SM8150`/76 项结构与固定原厂 PIT 分区布局一致，且日志无上传/flash/重分区标记，才可进入 `pass-recovery-transport-drill`。
-4. 前三项通过后，仍需先建立并单独复核“写入后让这台单槽设备可靠进入 `RECOVERY`”的精确触发方式。`heimdall close-pc-screen --resume` 只保证退出 PC screen/重启，不能证明进入 Recovery；手写 reviewer、时间或命令字符串也不能补足这个缺口。当前代码把 `RECOVERY_BOOT_TRIGGER_VALIDATED` 固定为 `false`，所以任何 action-plan manifest 都不能通过。未来若有实机证据，必须通过新的代码审查显式实现触发参数，再绑定三份外部报告、`.img/.fd/AML` 哈希、唯一目标分区 `RECOVERY`、原厂 `recovery.img` 回退镜像和机器可读停止条件。
-5. 因此当前即使其余外部报告在结构上全部通过，`execution_prerequisites_ready` 仍硬性保持 `false`，`execution_status` 保持 `blocked-first-boot-execution`。未来完成触发路径的独立代码审查后，状态最多只能变为 `awaiting-explicit-device-write-authorization`；用户仍须针对精确镜像、分区、命令和恢复路线另行明确授权。JSON、静态 pass 和“继续”都不能代替该授权。
+4. 前三项通过后，仍需先建立并单独复核“从 `EndSession(false)` 后的 Download Mode 让这台单槽设备可靠进入 `RECOVERY`”的精确触发方式。`heimdall close-pc-screen --resume` 只保证退出 PC screen/重启，不能证明进入 Recovery；手写 reviewer、时间或命令字符串也不能补足这个缺口。当前独立 `recovery_boot_trigger` 门禁没有任何已固定的可接受报告 SHA-256，缺失为 `pending`、任意自填报告为 `fail`，不存在可以直接翻转的布尔开关。候选按键状态机和未来无主机分区写入演练边界见 [RECOVERY-TRIGGER-DRILL.md](RECOVERY-TRIGGER-DRILL.md)。未来若有实机证据，必须通过新的代码审查固定报告哈希，再绑定四份外部报告、`.img/.fd/AML` 哈希、唯一目标分区 `RECOVERY`、原厂 `recovery.img` 回退镜像和机器可读停止条件。
+5. 当前历史 Heimdall 二进制来源不可追溯，只能用于已有证据和只读研究；动作计划会拒绝把它提升为未来写入工具。执行前还必须从固定、可核验源码构建 transport 工具，并重新完成只读 liveness 复核。
+6. 因此当前即使其余外部报告在结构上全部通过，`execution_prerequisites_ready` 仍硬性保持 `false`，`execution_status` 保持 `blocked-first-boot-execution`。未来完成触发路径与可追溯工具链的独立代码审查后，状态最多只能变为 `awaiting-explicit-device-write-authorization`；用户仍须针对精确镜像、分区、命令和恢复路线另行明确授权。JSON、静态 pass 和“继续”都不能代替该授权。
 
 `deployable`、`device_writes_performed` 和 `explicit_device_write_authorization_recorded` 在聚合结果中始终为 `false`。
 
@@ -100,6 +101,7 @@ python3 implementation/uefi/validate-first-boot.py \
   --windows-media-report /path/to/windows-media-validation.json \
   --stock-recovery-report /path/to/SM-T860-XAR-DWH1/validation.json \
   --recovery-transport-report /path/to/recovery-transport-evidence.json \
+  --recovery-trigger-report /path/to/reviewed-recovery-trigger-report.json \
   --action-plan /path/to/reviewed-first-boot-action-plan.json
 ```
 

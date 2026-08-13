@@ -80,12 +80,27 @@ EXPECTED_ACPI_REPORT_SHA256 = (
 EXPECTED_WINDOWS_VALIDATOR_SHA256 = (
     "34e28d4100024c11840ec1d634c0fbe556dd9c0adf86f515cb076d073b5a3a6f"
 )
-# No command sequence has yet been shown to move this exact single-slot
-# device from a no-reboot Heimdall RECOVERY write into RECOVERY reliably.
-# Local reports and transcripts are reproducibility evidence, not a trusted
-# execution authority, so this constant must remain false until that trigger
-# is separately implemented and reviewed in code.
-RECOVERY_BOOT_TRIGGER_VALIDATED = False
+# Historical evidence identifies a plausible physical-key transition, but no
+# current-session report has yet bound that transition to this device and the
+# post-EndSession(false) state.  The trigger gate therefore has no accepted
+# evidence digest.  Enabling it requires a reviewed code change that pins the
+# exact report SHA-256; there is no Boolean switch that can unlock execution.
+RECOVERY_TRIGGER_PROTOCOL_ID = (
+    "t860-dwh1-download-black-to-recovery-key-transition-v1"
+)
+EXPECTED_RECOVERY_TRIGGER_REPORT_SHA256: str | None = None
+RECOVERY_TRIGGER_REQUIRED_STOP_CONDITIONS = {
+    "identity-mismatch",
+    "multiple-or-no-download-device",
+    "read-only-precondition-failed",
+    "operator-sequence-deviation",
+    "both-volume-keys-active-at-abl-sample",
+    "android-boot-observed",
+    "download-mode-reentered",
+    "recovery-evidence-timeout",
+    "host-loses-observability",
+    "any-host-partition-write-observed",
+}
 HISTORICAL_HEIMDALL_SHA256 = (
     "636997aca4845d1ff253bf30adc98b4f2bd7a9fafbdceda7e7647527d17843ef"
 )
@@ -976,6 +991,332 @@ def validate_static_reports_and_artifacts(
 
 def pending_gate(reason: str) -> dict[str, Any]:
     return {"state": "pending", "reasons": [reason]}
+
+
+def validate_recovery_trigger_report(
+    path: Path | None, transport_gate: dict[str, Any]
+) -> dict[str, Any]:
+    """Gate a future no-partition-flash Recovery trigger drill.
+
+    A report cannot pass until its exact digest is pinned by an independent
+    code review.  This deliberately avoids a self-attested status field or a
+    manually flipped Boolean becoming execution authority.
+    """
+
+    if path is None:
+        return pending_gate(
+            "current-session no-partition-flash Recovery trigger report was not supplied"
+        )
+    report_path = path.resolve()
+    reasons: list[str] = []
+    try:
+        report = load_json(report_path)
+        report_record_value = report_record(report_path)
+    except SystemExit as exc:
+        return {
+            "state": "fail",
+            "path": str(report_path),
+            "report": None,
+            "protocol_id": RECOVERY_TRIGGER_PROTOCOL_ID,
+            "reasons": [str(exc)],
+        }
+    if transport_gate.get("state") != "pass":
+        reasons.append(
+            "Recovery trigger report cannot pass before recovery transport gate passes"
+        )
+    expected_top_level_keys = {
+        "schema",
+        "report_type",
+        "status",
+        "device",
+        "model",
+        "bootloader",
+        "protocol_id",
+        "transport_report_sha256",
+        "evidence_root",
+        "collection",
+        "files",
+        "precondition",
+        "operator_observation",
+        "recovery_evidence",
+        "return_to_android",
+        "stop_conditions",
+        "host_partition_writes_performed",
+        "partition_uploads",
+        "pit_write_performed",
+        "repartition_performed",
+        "storage_immutability_claimed",
+        "expected_incidental_metadata_effects",
+        "attempt_count",
+        "deployable",
+        "explicit_device_write_authorization_recorded",
+    }
+    require_equal(
+        reasons,
+        "Recovery trigger report keys",
+        set(report),
+        expected_top_level_keys,
+    )
+    for field, expected in {
+        "schema": 1,
+        "report_type": "sm-t860-recovery-boot-trigger-drill",
+        "status": "pass-no-partition-flash-recovery-trigger-drill",
+        "device": "samsung-gts6lwifi",
+        "model": "SM-T860",
+        "bootloader": "T860XXS5DWH1",
+        "protocol_id": RECOVERY_TRIGGER_PROTOCOL_ID,
+        "host_partition_writes_performed": False,
+        "partition_uploads": [],
+        "pit_write_performed": False,
+        "repartition_performed": False,
+        "storage_immutability_claimed": False,
+        "expected_incidental_metadata_effects": [
+            "boot/recovery cause history",
+            "Samsung param reset/update",
+            "recovery log/cache or BCB maintenance",
+        ],
+        "attempt_count": 1,
+        "deployable": False,
+        "explicit_device_write_authorization_recorded": False,
+    }.items():
+        require_equal(reasons, f"Recovery trigger {field}", report.get(field), expected)
+
+    transport_report = transport_gate.get("report")
+    expected_transport_sha = (
+        transport_report.get("sha256") if isinstance(transport_report, dict) else None
+    )
+    require_equal(
+        reasons,
+        "Recovery trigger transport report binding",
+        report.get("transport_report_sha256"),
+        expected_transport_sha,
+    )
+
+    evidence_root_value = report.get("evidence_root")
+    evidence_root: Path | None = None
+    if not isinstance(evidence_root_value, str):
+        reasons.append("Recovery trigger report lacks an evidence_root")
+    else:
+        try:
+            evidence_root = Path(evidence_root_value).expanduser().resolve()
+        except (OSError, ValueError):
+            reasons.append("Recovery trigger evidence_root is not a valid path")
+            evidence_root = None
+        if evidence_root is not None and not evidence_root.is_dir():
+            reasons.append(
+                f"Recovery trigger evidence root is missing: {evidence_root}"
+            )
+
+    collection_start: datetime | None = None
+    collection_end: datetime | None = None
+    collection = report.get("collection")
+    if not isinstance(collection, dict) or set(collection) != {
+        "started_at_utc",
+        "completed_at_utc",
+    }:
+        reasons.append("Recovery trigger collection window has invalid keys")
+    else:
+        for field in ("started_at_utc", "completed_at_utc"):
+            value = collection.get(field)
+            if not isinstance(value, str):
+                reasons.append(f"Recovery trigger collection lacks {field}")
+                continue
+            try:
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                reasons.append(f"Recovery trigger collection {field} is not ISO 8601")
+                continue
+            if parsed.tzinfo is None:
+                reasons.append(f"Recovery trigger collection {field} lacks a timezone")
+                continue
+            if field == "started_at_utc":
+                collection_start = parsed.astimezone(timezone.utc)
+            else:
+                collection_end = parsed.astimezone(timezone.utc)
+        if collection_start is not None and collection_end is not None:
+            if collection_end < collection_start:
+                reasons.append("Recovery trigger collection window is reversed")
+            elif collection_end - collection_start > timedelta(minutes=15):
+                reasons.append("Recovery trigger collection window exceeds 15 minutes")
+
+    required_evidence_markers = {
+        "recovery_getprop": [
+            "ro.boot.boot_recovery=1",
+            "ro.product.model=SM-T860",
+            "ro.boot.bootloader=T860XXS5DWH1",
+            "sys.boot_completed=0",
+            "ro.twrp.boot=1",
+            "ro.twrp.version=",
+        ],
+        "android_getprop": [
+            "ro.product.model=SM-T860",
+            "ro.boot.bootloader=T860XXS5DWH1",
+            "sys.boot_completed=1",
+        ],
+        "usb_enumeration": [
+            "USB_VID_PID:04e8:685d",
+            "UNIQUE_DOWNLOAD_DEVICE:true",
+        ],
+        "operator_transcript": [
+            "PROTOCOL_ID:" + RECOVERY_TRIGGER_PROTOCOL_ID,
+            "POWER_HELD_ACROSS_DISPLAY_BLACK_EDGE:true",
+            "VOLUME_DOWN_RELEASED_BEFORE_VOLUME_UP_PRESSED:true",
+            "BOTH_VOLUME_KEYS_ACTIVE:false",
+            "ATTEMPT_COUNT:1",
+        ],
+    }
+    files = report.get("files")
+    if not isinstance(files, dict) or set(files) != set(required_evidence_markers):
+        reasons.append("Recovery trigger evidence file ids do not match the fixed set")
+    elif evidence_root is not None:
+        for label, markers in required_evidence_markers.items():
+            item = files.get(label)
+            if not isinstance(item, dict) or set(item) != {"path", "sha256"}:
+                reasons.append(f"Recovery trigger {label} binding is invalid")
+                continue
+            relative = item.get("path")
+            declared_hash = item.get("sha256")
+            if not isinstance(relative, str) or Path(relative).is_absolute():
+                reasons.append(f"Recovery trigger {label} path must be relative")
+                continue
+            if not valid_sha256(declared_hash):
+                reasons.append(f"Recovery trigger {label} lacks a SHA-256")
+            try:
+                evidence_path = (evidence_root / relative).resolve()
+            except (OSError, ValueError):
+                reasons.append(f"Recovery trigger {label} path is invalid")
+                continue
+            if evidence_root not in evidence_path.parents or not evidence_path.is_file():
+                reasons.append(f"Recovery trigger {label} path escapes or is missing")
+                continue
+            evidence_record = file_record(evidence_path)
+            require_equal(
+                reasons,
+                f"Recovery trigger {label} local SHA-256",
+                evidence_record["sha256"],
+                declared_hash,
+            )
+            evidence_mtime = datetime.fromtimestamp(
+                evidence_path.stat().st_mtime, timezone.utc
+            )
+            if (
+                collection_start is not None
+                and collection_end is not None
+                and not (
+                    collection_start - timedelta(seconds=5)
+                    <= evidence_mtime
+                    <= collection_end + timedelta(seconds=5)
+                )
+            ):
+                reasons.append(
+                    f"Recovery trigger {label} mtime is outside the collection window"
+                )
+            evidence_text = evidence_path.read_text(
+                encoding="utf-8", errors="replace"
+            )
+            for marker in markers:
+                if marker == "ro.twrp.version=":
+                    if not re.search(r"(?m)^ro\.twrp\.version=\S+$", evidence_text):
+                        reasons.append(
+                            "Recovery trigger recovery_getprop lacks a nonempty TWRP version"
+                        )
+                elif marker not in evidence_text:
+                    reasons.append(f"Recovery trigger {label} lacks marker: {marker}")
+
+    precondition = report.get("precondition")
+    expected_transport_log_sha: object = None
+    expected_transport_pit_sha: object = None
+    transport_log = transport_gate.get("current_session_log")
+    transport_pit = transport_gate.get("current_session_pit")
+    if isinstance(transport_log, dict):
+        expected_transport_log_sha = transport_log.get("sha256")
+    if isinstance(transport_pit, dict):
+        expected_transport_pit_sha = transport_pit.get("sha256")
+    require_equal(
+        reasons,
+        "Recovery trigger precondition",
+        precondition,
+        {
+            "source_state": "download-mode-after-no-reboot",
+            "protocol_end_state": "EndSession(false)",
+            "transport_log_sha256": expected_transport_log_sha,
+            "transport_pit_sha256": expected_transport_pit_sha,
+            "usb_vid_pid": "04e8:685d",
+            "host_flash_command_executed": False,
+        },
+    )
+
+    require_equal(
+        reasons,
+        "Recovery trigger operator observation",
+        report.get("operator_observation"),
+        {
+            "requires_human": True,
+            "usb_connected": True,
+            "power_held_across_display_black_edge": True,
+            "volume_down_released_before_volume_up_pressed": True,
+            "both_volume_keys_active": False,
+            "transition_timing": "immediate-on-display-black-edge",
+        },
+    )
+    require_equal(
+        reasons,
+        "Recovery trigger evidence",
+        report.get("recovery_evidence"),
+        {
+            "adb_observed": True,
+            "ro.boot.boot_recovery": "1",
+            "ro.product.model": "SM-T860",
+            "ro.boot.bootloader": "T860XXS5DWH1",
+            "sys.boot_completed": "0",
+            "twrp_boot": "1",
+            "twrp_version_nonempty": True,
+        },
+    )
+    require_equal(
+        reasons,
+        "Recovery trigger Android return evidence",
+        report.get("return_to_android"),
+        {
+            "same_device_identity": True,
+            "ro.product.model": "SM-T860",
+            "ro.boot.bootloader": "T860XXS5DWH1",
+            "sys.boot_completed": "1",
+        },
+    )
+    stop_conditions = report.get("stop_conditions")
+    if (
+        not isinstance(stop_conditions, list)
+        or not all(isinstance(item, str) for item in stop_conditions)
+        or len(stop_conditions) != len(RECOVERY_TRIGGER_REQUIRED_STOP_CONDITIONS)
+        or set(stop_conditions) != RECOVERY_TRIGGER_REQUIRED_STOP_CONDITIONS
+    ):
+        reasons.append(
+            "Recovery trigger stop conditions do not match the fixed set"
+        )
+    if EXPECTED_RECOVERY_TRIGGER_REPORT_SHA256 is None:
+        reasons.append(
+            "no Recovery trigger report digest has been independently reviewed and pinned"
+        )
+    else:
+        require_equal(
+            reasons,
+            "Recovery trigger report SHA-256",
+            report_record_value["sha256"],
+            EXPECTED_RECOVERY_TRIGGER_REPORT_SHA256,
+        )
+    return {
+        "state": "pass" if not reasons else "fail",
+        "path": str(report_path),
+        "report": report_record_value,
+        "protocol_id": RECOVERY_TRIGGER_PROTOCOL_ID,
+        "reasons": reasons,
+        "trust_boundary": (
+            "A future pass may prove only a reviewed physical trigger from a "
+            "post-EndSession(false) Download Mode state. It is not a UEFI boot "
+            "result, a storage-immutability claim, or device-write authorization."
+        ),
+    }
 
 
 def validate_windows_report(path: Path | None) -> dict[str, Any]:
@@ -1885,6 +2226,7 @@ def validate_transport_report(path: Path | None) -> dict[str, Any]:
         "path": str(report_path),
         "report": report_record(report_path),
         "tool": tool_record,
+        "tool_source_traceable": historical.get("tool_source_traceable") is True,
         "historical_transport_capability": (
             "pass" if historical_verified else "fail"
         ),
@@ -1915,26 +2257,53 @@ def validate_action_plan(
     windows_gate: dict[str, Any],
     stock_gate: dict[str, Any],
     transport_gate: dict[str, Any],
+    trigger_gate: dict[str, Any],
 ) -> dict[str, Any]:
     if path is None:
         return pending_gate("independently reviewed exact action plan was not supplied")
     report_path = path.resolve()
     report = load_json(report_path)
     reasons: list[str] = []
-    if not RECOVERY_BOOT_TRIGGER_VALIDATED:
-        reasons.append(
-            "execution gate is intentionally disabled until an exact RECOVERY "
-            "boot trigger is implemented and independently reviewed"
-        )
+    expected_top_level_keys = {
+        "schema",
+        "report_type",
+        "status",
+        "device",
+        "model",
+        "first_boot_medium",
+        "transport",
+        "device_writes_performed",
+        "deployable",
+        "explicit_device_write_authorization_recorded",
+        "firmware",
+        "evidence_reports",
+        "target",
+        "stop_conditions",
+        "reviewed_by",
+        "reviewed_at_utc",
+        "execution",
+    }
+    require_equal(
+        reasons,
+        "action plan top-level keys",
+        set(report),
+        expected_top_level_keys,
+    )
     for dependency, gate in {
         "Windows media": windows_gate,
         "stock recovery": stock_gate,
         "recovery transport": transport_gate,
+        "Recovery boot trigger": trigger_gate,
     }.items():
         if gate.get("state") != "pass":
             reasons.append(f"action plan cannot pass before {dependency} gate passes")
+    if transport_gate.get("tool_source_traceable") is not True:
+        reasons.append(
+            "action plan cannot pass until the execution transport tool is built "
+            "from a pinned, traceable source"
+        )
     for field, expected in {
-        "schema": 1,
+        "schema": 2,
         "report_type": "sm-t860-first-boot-action-plan",
         "status": "pass-first-boot-action-plan-review",
         "device": "samsung-gts6lwifi",
@@ -1950,6 +2319,10 @@ def validate_action_plan(
         "authorized",
         "authorization",
         "device_write_authorized",
+        "execution_authorized",
+        "explicit_authorization",
+        "write_authorized",
+        "flash_authorized",
     ):
         if report.get(authorization_field) not in (None, False):
             reasons.append(
@@ -1970,12 +2343,13 @@ def validate_action_plan(
     evidence_reports = report.get("evidence_reports")
     if all(
         gate.get("state") == "pass"
-        for gate in (windows_gate, stock_gate, transport_gate)
+        for gate in (windows_gate, stock_gate, transport_gate, trigger_gate)
     ):
         expected_reports = {
             "windows_media_sha256": windows_gate["report"]["sha256"],
             "stock_recovery_sha256": stock_gate["report"]["sha256"],
             "recovery_transport_sha256": transport_gate["report"]["sha256"],
+            "recovery_trigger_sha256": trigger_gate["report"]["sha256"],
         }
         require_equal(
             reasons,
@@ -2057,6 +2431,7 @@ def validate_action_plan(
         allowed_execution_keys = {
             "write_argv",
             "boot_trigger_argv",
+            "boot_trigger",
             "restore_argv",
             "pit_flash_planned",
             "repartition_planned",
@@ -2090,10 +2465,23 @@ def validate_action_plan(
             if heimdall_path is not None
             else None
         )
-        # Exiting Download Mode with close-pc-screen does not itself prove that
-        # the tablet will enter RECOVERY.  Until a separately reviewed trigger
-        # is established, no action plan may pass this gate.
+        # This is a human key transition, not a Heimdall reboot command.
         expected_boot_trigger_argv = None
+        expected_boot_trigger = (
+            {
+                "method_id": RECOVERY_TRIGGER_PROTOCOL_ID,
+                "kind": "human-key-transition",
+                "requires_human": True,
+                "usb_connected": True,
+                "source_state": "download-mode-after-no-reboot",
+                "transition_timing": "immediate-on-display-black-edge",
+                "attempt_limit": 1,
+                "evidence_sha256": trigger_gate["report"]["sha256"],
+            }
+            if trigger_gate.get("state") == "pass"
+            and isinstance(trigger_gate.get("report"), dict)
+            else None
+        )
         expected_restore_argv = (
             [heimdall_path, "flash", "--RECOVERY", stock_recovery_path]
             if heimdall_path is not None and stock_recovery_path is not None
@@ -2110,6 +2498,12 @@ def validate_action_plan(
             "action plan exact boot trigger argv",
             execution.get("boot_trigger_argv"),
             expected_boot_trigger_argv,
+        )
+        require_equal(
+            reasons,
+            "action plan exact boot trigger protocol",
+            execution.get("boot_trigger"),
+            expected_boot_trigger,
         )
         require_equal(
             reasons,
@@ -2179,6 +2573,14 @@ parser.add_argument(
     ),
 )
 parser.add_argument(
+    "--recovery-trigger-report",
+    type=Path,
+    help=(
+        "Independently reviewed no-partition-flash Recovery trigger drill; "
+        "no report digest is accepted in the current validator"
+    ),
+)
+parser.add_argument(
     "--action-plan",
     type=Path,
     help="Independently reviewed exact-image/partition/rollback plan; never generated here",
@@ -2210,22 +2612,26 @@ stock_gate = validate_stock_recovery(
     args.stock_recovery_report, args.stock_critical_dir
 )
 transport_gate = validate_transport_report(args.recovery_transport_report)
+trigger_gate = validate_recovery_trigger_report(
+    args.recovery_trigger_report, transport_gate
+)
 action_plan_gate = validate_action_plan(
     args.action_plan,
     static_gate,
     windows_gate,
     stock_gate,
     transport_gate,
+    trigger_gate,
 )
 external_gates = {
     "windows_media": windows_gate,
     "stock_recovery": stock_gate,
     "recovery_transport": transport_gate,
+    "recovery_boot_trigger": trigger_gate,
     "exact_action_plan": action_plan_gate,
 }
 execution_prerequisites_ready = (
-    RECOVERY_BOOT_TRIGGER_VALIDATED
-    and static_pass
+    static_pass
     and all(gate["state"] == "pass" for gate in external_gates.values())
 )
 supplied_gate_failed = any(
@@ -2266,7 +2672,7 @@ result: dict[str, Any] = {
         historical_authentication_support
     ),
     "exact_current_image_hardware_tested": False,
-    "recovery_boot_trigger_validated": RECOVERY_BOOT_TRIGGER_VALIDATED,
+    "recovery_boot_trigger_validated": trigger_gate["state"] == "pass",
     "execution_prerequisites_ready": execution_prerequisites_ready,
     "external_evidence_trust": "local-self-attested-not-execution-authority",
     "deployable": False,
