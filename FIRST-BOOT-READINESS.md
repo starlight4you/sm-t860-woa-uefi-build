@@ -65,7 +65,7 @@ python3 implementation/uefi/validate-first-boot.py
 
 这些本地 JSON、日志与文件哈希用于发现过期产物、错盘、错架构和不完整检查，属于可复核但可由本机管理员改写的自证材料，不是可信执行证明、签名证明或授权载体。聚合器因此不会仅凭这些材料把本项目提升为可执行状态。
 
-`--execution-tool-provenance-report` 和 `--execution-tool-liveness-report` 当前只是严格 collector schema；本仓库没有会操作 USB 的 collector，也没有自动安装依赖或运行 Heimdall 的 builder。离线构建器若后续加入，只能导出源码、构建并采集原始事实，不能产生 pass。实际 executor 还必须避免 pathname 校验后替换的 TOCTOU：应以已打开的只读文件描述符或受控不可变 staging 运行刚复核的 binary，并清理 `LD_*`/`DYLD_*` 等动态加载注入变量；validator 本身不会执行它。
+`--execution-tool-provenance-report` 和 `--execution-tool-liveness-report` 当前只是严格 collector schema；本仓库只有不操作 USB 的纯离线 [`collect-execution-tool-provenance.py`](implementation/uefi/collect-execution-tool-provenance.py)，没有 liveness collector，也不会自动安装依赖或构建 Heimdall。该 collector 只整理显式输入并采集原始事实，不能产生 pass。实际 executor 还必须避免 pathname 校验后替换的 TOCTOU：应以已打开的只读文件描述符或受控不可变 staging 运行刚复核的 binary，并清理 `LD_*`/`DYLD_*` 等动态加载注入变量；validator 本身不会执行它。
 
 ## 实机执行前的全部门槛
 

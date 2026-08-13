@@ -48,6 +48,8 @@ chmod +x implementation/uefi/build-gts6lwifi.sh
 
 历史 transport schema 2 与来源不明的 Heimdall 2.0.2 证据原样保留，只能证明历史能力，永远不会成为未来动作计划的 binary。未来 execution tool 固定到 SourceHut Heimdall `v2.2.2` 的 tag object、commit、tree、archive SHA-256 和签名 key fingerprint；但当前公钥文件、最终宿主 binary、provenance report 和 liveness report 的预期 SHA-256 都故意未固定，且 pass 验证实现还有独立的 `False` 硬阻断。因而缺报告为 `pending`，结构正确的 Linux x86_64 或 macOS ARM64 离线构建也只会是候选；不得通过机械填哈希解除阻断。后续必须先补齐真实二进制/依赖解析、签名验证、源码到产物绑定、固定 collector/watchdog 和无 TOCTOU 的 executor，再在最终执行宿主上对完全相同 binary SHA-256 另行授权只读 `download-pit` liveness。当前聚合器硬性保持 `execution_prerequisites_ready: false`。静态通过只记为 `offline_firmware_composition_pass`：当前 header v0/4096/empty-ramdisk 容器与已测 gts6l 上游 packer 一致，同机 unlocked ABL 也有允许无 Samsung/AVB 尾部 TWRP recovery 的历史证据；但当前精确镜像从未实机测试，仍然不是可刷写发布物。所有输出始终保持 `deployable: false` 和未授权状态。
 
+[`implementation/uefi/collect-execution-tool-provenance.py`](implementation/uefi/collect-execution-tool-provenance.py) 可将明确提供的本地 v3 构建包、固定源码/Git/GnuPG 原始状态、binary 与 libusb 整理为 13 个独立绑定文件；详细输入和安全边界见 [`COLLECT-EXECUTION-TOOL-PROVENANCE.md`](implementation/uefi/COLLECT-EXECUTION-TOOL-PROVENANCE.md)。它完全离线且绝不运行 Heimdall，不会产生 liveness 或 pass；现有 schema 对 tag/commit 仍只有聚合状态槽，此限制也被明确保留。
+
 经用户对该次动作单独授权，2026-08-13 的当前会话只读 Download Mode/PIT 演练已通过；设备随后正常返回 Android。现场 PIT 的脱敏摘要、规范化日志和比较结果见 [`evidence/download-mode-readonly-20260813/`](evidence/download-mode-readonly-20260813/)。该结果只关闭 transport liveness 缺口，不解除 Windows 介质、Recovery 首启触发或明确写入授权门槛。
 
 ## 安全边界
