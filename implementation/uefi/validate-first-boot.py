@@ -1332,37 +1332,75 @@ def validate_execution_tool_provenance_report(
                         for line in text.splitlines()
                         if line.startswith("[GNUPG:] ")
                     ]
+                    terminal_signature_kinds = {
+                        "GOODSIG",
+                        "BADSIG",
+                        "EXPSIG",
+                        "EXPKEYSIG",
+                        "REVKEYSIG",
+                        "ERRSIG",
+                    }
                     valid_signatures: list[tuple[str, str]] = []
+                    terminal_signatures: list[list[str]] = []
                     for line in status_lines:
                         fields = line.split()
-                        if len(fields) >= 12 and fields[1] == "VALIDSIG":
-                            signing_fingerprint = fields[2].upper()
-                            primary_fingerprint = fields[-1].upper()
-                            valid_signatures.append(
-                                (signing_fingerprint, primary_fingerprint)
-                            )
+                        if len(fields) >= 2 and fields[1] == "VALIDSIG":
+                            if len(fields) != 12:
+                                reasons.append(
+                                    "execution-tool VALIDSIG record is malformed"
+                                )
+                            else:
+                                valid_signatures.append(
+                                    (fields[2].upper(), fields[11].upper())
+                                )
+                        if (
+                            len(fields) >= 2
+                            and fields[1] in terminal_signature_kinds
+                        ):
+                            terminal_signatures.append(fields)
                     if len(valid_signatures) != 2:
                         reasons.append(
                             "execution-tool signature status must contain exactly "
                             "two VALIDSIG records (tag and commit)"
                         )
-                    if sum(
-                        line.startswith("[GNUPG:] GOODSIG ")
-                        for line in status_lines
-                    ) != 2:
-                        reasons.append(
-                            "execution-tool signature status must contain exactly "
-                            "two GOODSIG records (tag and commit)"
-                        )
-                    for signing_fingerprint, primary_fingerprint in valid_signatures:
-                        if EXECUTION_HEIMDALL_SIGNING_FINGERPRINT not in {
-                            signing_fingerprint,
-                            primary_fingerprint,
-                        }:
+                    for _, primary_fingerprint in valid_signatures:
+                        if primary_fingerprint != EXECUTION_HEIMDALL_SIGNING_FINGERPRINT:
                             reasons.append(
                                 "execution-tool VALIDSIG is not bound to the fixed "
                                 "primary fingerprint"
                             )
+                    expired_key_signatures = [
+                        fields
+                        for fields in terminal_signatures
+                        if fields[1] == "EXPKEYSIG"
+                    ]
+                    if (
+                        len(terminal_signatures) != 2
+                        or len(expired_key_signatures) != 2
+                    ):
+                        reasons.append(
+                            "execution-tool signature status must contain exactly "
+                            "two EXPKEYSIG terminal records and no other terminal "
+                            "signature status"
+                        )
+                    valid_signer_ids = sorted(
+                        fingerprint[-16:] for fingerprint, _ in valid_signatures
+                    )
+                    expired_signer_ids: list[str] = []
+                    for fields in expired_key_signatures:
+                        if len(fields) < 3 or not re.fullmatch(
+                            r"(?:[0-9A-F]{16}|[0-9A-F]{40})", fields[2].upper()
+                        ):
+                            reasons.append(
+                                "execution-tool EXPKEYSIG lacks a valid signing key ID"
+                            )
+                        else:
+                            expired_signer_ids.append(fields[2].upper()[-16:])
+                    if sorted(expired_signer_ids) != valid_signer_ids:
+                        reasons.append(
+                            "execution-tool EXPKEYSIG key IDs do not bind the "
+                            "VALIDSIG signing fingerprints"
+                        )
                     if not any(
                         line.startswith("[GNUPG:] KEYEXPIRED ")
                         for line in status_lines
