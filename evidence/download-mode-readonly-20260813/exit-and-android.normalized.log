@@ -1,0 +1,28 @@
+EXIT_STARTED_AT_UTC=2026-08-13T03:41:11Z
+USB_VID_PID:04e8:685d
+COMMAND_ARGV_JSON:["/Volumes/Clips 2301-04/t860-ui8/heimdall","close-pc-screen","--resume","--stdout-errors"]
+Heimdall v2.0.2
+
+Initialising connection...
+Detecting device...
+Claiming interface...
+Beginning session...
+
+Session begun.
+
+Attempting to close connect to pc screen...
+Ending session...
+Rebooting device...
+Releasing device interface...
+
+Attempt complete
+HEIMDALL_EXIT_CODE=0
+EXIT_COMPLETED_AT_UTC=2026-08-13T03:41:15Z
+ADB_RETURNED_AT_UTC=2026-08-13T03:42:16Z
+MODEL=SM-T860
+DEVICE=gts6lwifi
+BOOTLOADER=T860XXS5DWH1
+DEVICE_IDENTITY_MATCHED_PREFLIGHT=true
+SYS_BOOT_COMPLETED=1
+VERIFIED_BOOT_STATE=orange
+DEVICE_WRITES_PERFORMED=false

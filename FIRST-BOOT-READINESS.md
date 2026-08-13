@@ -66,6 +66,25 @@ python3 implementation/uefi/validate-first-boot.py
 
 ## 实机执行前的全部门槛
 
+### 2026-08-13 当前会话只读演练
+
+用户单独授权进入 Download Mode 后，本机已完成一次严格限制的只读
+`download-pit --no-reboot --stdout-errors` 演练。主机只在唯一 Samsung
+`04e8:685d` 枚举出现后运行固定 Heimdall；命令 exit 0，现场 PIT 解析为
+`COM_TAR2`、`SM8150`、4 LUN、76 项，且 76 项全部字段与 DWH1 原厂 PIT
+一致。原厂 PIT 的完整 10,572 字节（含末尾 512 字节 Samsung trailer）是
+现场文件的精确前缀；多出的 5,812 字节全为零填充。独立
+`close-pc-screen --resume` 成功请求默认
+重启，约一分钟后同一设备返回 ADB，`sys.boot_completed=1`。全程没有执行
+上传、flash、PIT 写入或重分区。
+
+脱敏证据见
+[`evidence/download-mode-readonly-20260813/`](evidence/download-mode-readonly-20260813/)。
+严格 transport gate 现可记为 `pass-recovery-transport-drill`；但本地报告仍
+属于自证材料，Windows 介质门禁仍未提供，而且精确 Recovery 首启触发仍
+未建立。因此 `RECOVERY_BOOT_TRIGGER_VALIDATED=false`、
+`execution_prerequisites_ready=false` 和 `deployable=false` 均不改变。
+
 1. 在 Windows 主机用固定 `validate-windows-media.ps1` 只读检查实际 Windows 分区和 ESP。报告必须证明两分区位于同一 GPT 可移除物理盘，整盘及其任一分区都不是 host boot/system；且 ARM64 PE、三份 EFI 哈希一致性、QCOM2466 映射、同一 sdbus manifest 中的 descriptor/BootFlags、sdstor BootFlags 和绑定实际盘符的 BCD 语义都通过。
 2. 用 `--stock-recovery-report` 提供 DWH1 本地报告。聚合器重新散列 6.7 GB ZIP 和 `boot.img`、`recovery.img`、`dtbo.img`、`vbmeta.img`、PIT。PIT 只用于分区映射与容量核对，不得刷写或重分区。
 3. 只有单独获得“进入 Download Mode/重启”授权后，才可运行当前会话的只识别、不刷写 drill。未运行时 `current_session.state` 必须是 `not-run`，`flash_attempted` 和 `device_writes_performed` 必须是 `null`，总门禁保持 `pending-current-session-read-only-download-mode-drill`。完成态必须把 `command_argv` 精确绑定到固定 Heimdall 二进制、`download-pit`、唯一输出路径和只读参数；同时绑定当次日志与独立 inode 的 `current-session.pit`，重算 SHA-256，验证 `COM_TAR2`/`SM8150`/76 项结构与固定原厂 PIT 分区布局一致，且日志无上传/flash/重分区标记，才可进入 `pass-recovery-transport-drill`。

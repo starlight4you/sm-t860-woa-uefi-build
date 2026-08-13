@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "validated_at_utc": "2026-08-13T03:47:30.365557Z",
+  "validator_repository_commit": "49d0758ded56f38eea0eac91e9f5da046c630474",
+  "validator_sha256": "14e4090abaf78a8d088c7bbb01220ed76ecb210fd999c651a09162bac92e49f9",
+  "device": "samsung-gts6lwifi",
+  "model": "SM-T860",
+  "offline_firmware_composition_pass": true,
+  "stock_recovery_state": "pass",
+  "historical_transport_capability": "pass",
+  "current_transport_liveness": "pass",
+  "recovery_transport_state": "pass",
+  "recovery_transport_reasons": [],
+  "windows_media_state": "pending",
+  "exact_action_plan_state": "pending",
+  "recovery_boot_trigger_validated": false,
+  "execution_status": "blocked-first-boot-execution",
+  "execution_prerequisites_ready": false,
+  "deployable": false,
+  "device_writes_performed": false,
+  "explicit_device_write_authorization_recorded": false,
+  "external_evidence_trust": "local-self-attested-not-execution-authority"
+}

@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "compared_at_utc": "2026-08-13T03:42:30Z",
+  "current_pit": {
+    "file": "current-session.pit",
+    "bytes": 16384,
+    "sha256": "74f72dbd9c219665c8cd6c21bbb52344f34f78dff6c8ef6b04030c0f09ac8a4f",
+    "magic": "0x12349876",
+    "entry_count": 76,
+    "header": "COM_TAR2",
+    "cpu_bootloader_tag": "SM8150",
+    "logic_unit_count": 4,
+    "entries_parsed": 76,
+    "trailer_and_padding_bytes": 6324
+  },
+  "stock_pit": {
+    "file": "GTS6LWIFI_EUR_OPEN.pit",
+    "bytes": 10572,
+    "sha256": "de3f707d2f2ef0207341e0fd8a53b7c433423920ae1214e74454e6c618ec47b4",
+    "magic": "0x12349876",
+    "entry_count": 76,
+    "header": "COM_TAR2",
+    "cpu_bootloader_tag": "SM8150",
+    "logic_unit_count": 4,
+    "entries_parsed": 76,
+    "trailer_bytes": 512
+  },
+  "distinct_path": true,
+  "distinct_inode": true,
+  "raw_hash_equal": false,
+  "stock_file_is_exact_prefix_of_current": true,
+  "all_76_partition_entries_equal": true,
+  "stock_trailer_512_bytes_equal": true,
+  "current_extra_padding_bytes": 5812,
+  "current_extra_padding_all_zero": true,
+  "status": "pass-current-pit-layout-comparison",
+  "device_writes_performed": false
+}

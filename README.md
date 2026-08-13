@@ -46,8 +46,12 @@ chmod +x implementation/uefi/build-gts6lwifi.sh
 
 进一步的 microSD/USB 候选启动链、Windows `ACPI\QCOM2466` 跨设备驱动证据、恢复门槛和可重复检查命令见 [FIRST-BOOT-READINESS.md](FIRST-BOOT-READINESS.md)。`implementation/uefi/validate-first-boot.py` 会直接绑定最终 `.fd/.img/AML`、三份本地报告、关键模块名称/GUID 和固定 UEFI gitlink/HEAD；外部 Windows、原厂恢复、传输与精确动作计划按严格 schema 聚合，不能只凭 `status` 字符串通过。它不会操作设备，也不会生成传输或动作计划。本地报告属于可复核但可改写的自证材料，不是执行授权；而且当前尚无经验证的精确 Recovery 首启触发方式，因此聚合器硬性保持 `execution_prerequisites_ready: false`。静态通过只记为 `offline_firmware_composition_pass`：当前 header v0/4096/empty-ramdisk 容器与已测 gts6l 上游 packer 一致，同机 unlocked ABL 也有允许无 Samsung/AVB 尾部 TWRP recovery 的历史证据；但当前精确镜像从未实机测试，仍然不是可刷写发布物。所有输出始终保持 `deployable: false` 和未授权状态。
 
+经用户对该次动作单独授权，2026-08-13 的当前会话只读 Download Mode/PIT 演练已通过；设备随后正常返回 Android。现场 PIT 的脱敏摘要、规范化日志和比较结果见 [`evidence/download-mode-readonly-20260813/`](evidence/download-mode-readonly-20260813/)。该结果只关闭 transport liveness 缺口，不解除 Windows 介质、Recovery 首启触发或明确写入授权门槛。
+
 ## 安全边界
 
 本仓库只授权离线构建和检查。严禁 `dd`、fastboot、ADB、Odin、Heimdall、写磁盘分区、刷写 boot/recovery/UFS 或重启 T860。
+
+上面的 2026-08-13 演练是用户针对一次明确、只读动作给出的单独授权记录，不扩大本仓库的常规权限，也不授权后续设备操作。
 
 新 Codex 会话可直接使用 [NEW-SESSION-PROMPT.md](NEW-SESSION-PROMPT.md)。第三方来源见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
