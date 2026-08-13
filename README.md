@@ -26,7 +26,7 @@ chmod +x implementation/uefi/build-gts6lwifi.sh
 ./implementation/uefi/build-gts6lwifi.sh
 ```
 
-注意确认当前 LLVM 路径，并让 `CLANGPDB_BIN` 和 `CLANGPDB_AARCH64_PREFIX=aarch64-linux-gnu-` 在真正运行 `build_uefi.py` 的环境中生效。上游 `build_setup.sh` 面向 Ubuntu 24.04，但其中的 `export` 不会传回调用它的父 shell。
+注意确认当前 LLVM 路径。构建脚本会创建临时 Python venv，并在运行 `build_uefi.py` 前显式导出 `CLANGPDB_BIN` 和 `CLANGPDB_AARCH64_PREFIX=aarch64-linux-gnu-`。它不会调用带有 `sudo apt` 和浮动 NuGet 下载的上游 `build_setup.sh`；宿主依赖必须按“环境”一节预先安装。
 
 预期输出：
 
@@ -36,7 +36,11 @@ chmod +x implementation/uefi/build-gts6lwifi.sh
 - `implementation/build/uefi/ufs-offline-validation.json`
 - `implementation/build/uefi/ufs-offline-source-preparation.json`
 
-构建脚本会把 UFS-offline AML 注入临时上游树，在 `APRIORI.inc`、`DXE.inc`、`DXE.dsc.inc` 中剔除有效 `UFSDxe` 引用，同时保留 `SdccDxe`。构建后固定安装 `uefi_firmware==1.16`，递归解析压缩 FV；二进制中不得存在 `UFSDxe` GUID/名称，必须存在 `SdccDxe`。验证状态应为 `pass-ufs-offline-uefi-build`，并确认 `.fd` 和 `.img` 都精确包含该 AML，boot image 精确包含一次 `.fd`。所有产物仍是 `deployable: false`。
+构建脚本会把 UFS-offline AML 注入临时上游树，在 `APRIORI.inc`、`DXE.inc`、`DXE.dsc.inc` 中剔除有效 `UFSDxe` 引用，同时保留 `SdccDxe`。为了让安全输入可独立按原始字节核验，临时树还会把 ACPI freeform 文件从 LZMA 内层 `FVMAIN` 移到未压缩的外层 `FVMAIN_COMPACT`，并以设备级 `bootpack.json` 关闭 boot payload gzip；这两个改动只作用于 T860 的临时构建树，不改固定 submodule。
+
+构建后固定安装 `uefi_firmware==1.16`，递归解析压缩 FV；二进制中不得存在 `UFSDxe` GUID/名称，必须存在 `SdccDxe`。验证状态应为 `pass-ufs-offline-uefi-build`，并确认 `.fd` 和 `.img` 都精确包含该 AML，boot image 精确包含一次 `.fd`。所有产物仍是 `deployable: false`。
+
+提交 `cbe1074` 中的 `dist-gts6lwifi-ufs-offline/` 是首个通过上述静态门槛的参考产物。它仍然只用于离线分析，不是可刷写发布包。
 
 `implementation/build/acpi-ufs-offline/validation.json` 记录 UFS0/UFS1 `_STA=0`、SDC2 `_STA=15`。这仅建立离线隔离证据，不代表镜像已经可启动或允许刷写。
 

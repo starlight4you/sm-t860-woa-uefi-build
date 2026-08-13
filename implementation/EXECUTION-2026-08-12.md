@@ -2,7 +2,7 @@
 
 ## 当前结论
 
-本轮已经从“可行性研究”进入“可复现离线实现”。结论是：**值得继续到可逆、外置介质的 Windows 启动验证，但现在还不能刷写或部署。**
+本轮已经从“可行性研究”进入“可复现离线实现”。结论是：**值得继续到可逆、外置介质的 Windows 启动验证，但现在还不能刷写或部署。** 2026-08-13 的 UFS-offline Linux 构建已达到 `pass-ufs-offline-uefi-build`，参考产物位于 `dist-gts6lwifi-ufs-offline/`，但 `deployable` 仍为 `false`。
 
 值得继续的依据不是参考机相似，而是 T860 官方源码、当前 Android 实机和既有 Windows 资产已经形成闭环：
 
@@ -23,7 +23,7 @@
 | Fuel gauge | 合法项目 HID `SMF5705`，I2C 0x71；不公开 IRQ | 仅只读遥测；未暴露 charger/MUIC；源码需 WDK 构建 |
 | OEM | 三包 MVP FeatureManifest 和明确的非部署清单 | `pass-source-stage`；缺少两个源驱动二进制符合预期 |
 | Windows 构建 | Wacom/SM5705 ARM64 构建、PE 校验、InfVerif、Inf2Cat、可选测试签名脚本 | 已准备，当前 macOS 主机不能执行 WDK 阶段 |
-| UEFI 集成 | 临时 clone 注入 AML、构建后校验 FD/boot image 内含精确 AML | 集成预检通过；完整构建要求 Linux x86_64 + Python 3.12，当前 Apple ARM64 主机不满足 |
+| UEFI 集成 | 临时 clone 注入 AML、剔除 UFSDxe、保留 SdccDxe、构建后递归解析 FV | Linux x86_64 构建与静态校验通过；仍不可部署 |
 
 AML 产物为 `360474` 字节，SHA-256：
 
@@ -36,7 +36,7 @@ AML 产物为 `360474` 字节，SHA-256：
 当前 `implementation/build/oem` 故意保持 `deployable: false`，原因如下：
 
 1. Wacom 与 SM5705 的 ARM64 `.sys` 尚未由 Windows 11 WDK 实际构建；三份改过的 INF 也没有新 catalog/test signature。
-2. AML 尚未集成进一个可从外置/可恢复路径启动的 T860 UEFI；只验证了编译和反编译闭环。
+2. AML 已集成进 UFS-offline 参考 UEFI 并通过静态校验，但尚未证明 T860 能从可逆路径执行它，也未证明失败后的恢复链。
 3. qci2c 的 UID 12/15 注册值虽有 DTS 和现有驱动格式依据，但是否能在 FIFO 模式 Code 0 必须用 Windows PnP/ETW/KD 验证。
 4. Wacom GPIO68 在 Android 是 boot-on、active-high 的 3.3 V regulator enable。现驱动会做受控 low/high 上电序列；时序仍需真机日志验证。
 5. SM5705 包只读取 fuel-gauge 寄存器。它不能控制主 charger、MUIC 或 S2MM005，也不能据此允许无人值守充电。
@@ -60,13 +60,13 @@ WDK 阶段通过后，真机顺序必须是：
 4. 最后安装 Wacom，检查 startup query、GPIO5 IRQ、四角、倾斜、擦除和睡眠唤醒。
 5. 任一步出现 I2C 总线锁死、持续中断风暴或 UFS 被联机，立即停止并回到 Android/恢复路径。
 
-固件构建需转到 Linux x86_64 主机执行：
+固件可在 Linux x86_64 主机复现：
 
 ```sh
 ./implementation/uefi/build-gts6lwifi.sh
 ```
 
-当前主机是 Darwin/arm64，且 `mu_aloha_platforms` 明确只支持 Linux x86_64 与 Python 3.12+，所以本轮只完成了 AML 表头/长度/校验和、上游参考哈希与 FDF 设备 DSDT 选择路径的集成预检，没有伪报完整固件构建成功。
+参考构建固定 `mu_aloha_platforms` revision `96add763040d86d21f87a4a4022e094e17e6e3c6`。构建脚本在临时树中将安全 ACPI 放入未压缩外层 FV，并关闭 boot payload gzip，以便对最终 FD/IMG 做精确字节验证；不会改写固定 submodule。当前 macOS/arm64 主机只进行产物和脚本的离线审计，不在本机伪造 Linux 构建结果。
 
 ## 继续价值与止损条件
 
