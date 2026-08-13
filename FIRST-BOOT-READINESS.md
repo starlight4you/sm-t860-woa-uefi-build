@@ -1,0 +1,108 @@
+# SM-T860 可恢复首启门禁
+
+更新日期：2026-08-13。本页只记录离线固件组合证据与继续实验前的门槛；它不是刷写教程，不证明精确镜像已能在实机启动，也不授权重启或写入设备。
+
+## 当前结论
+
+最终 UFS-offline 产物形成了值得继续验证的 microSD 候选启动路径，但还没有达到实机执行条件：
+
+- `.fd` 的递归 FV 清单同时按 UI 名称和 FFS GUID 确认 `BdsDxe`、`MsBootPolicy`、`SdccDxe`、`DiskIoDxe`、`PartitionDxe`、`Fat`；`QcomBds` 和 `UFSDxe` 的名称与 GUID 均不存在。
+- 固件还包含 `XhciDxe`、`UsbBusDxe`、`UsbMassStorageDxe`。这只证明 USB 存储组件已编入，不证明 T860 的 USB PHY、供电或实机枚举已工作。
+- 父仓库 gitlink 和 submodule HEAD 都固定在 `96add763040d86d21f87a4a4022e094e17e6e3c6`。该版本注册 `SDD` 后注册 `USB`，正常启动序列是 HDD 后 USB，并取消了拒绝 SD 设备路径的逻辑。
+- 最终 AML 在 `.fd` 和 Android boot `.img` 中各精确出现一次；完整 `.fd` 在 `.img` 中也精确出现一次。UFS0/UFS1 `_STA=0`，SDC2 `_STA=15`，SDC2 的硬件 ID 是 `ACPI\QCOM2466`。这是 UFS 离线的静态证据，不是运行时证明。
+- 同类 Qualcomm Samsung ARM64 资料把 `ACPI\QCOM2466` 映射到 Microsoft `sdbus.inf/sdbus.sys` 的 `SDHostQualcomm8974Std`，并有 `sdbus/sdstor BootFlags=0x8` 样本。这是跨设备参考，不替代目标 Windows ARM64 介质审计或 T860 运行时验证。
+
+Android boot 容器的结论需要准确降调。DWH1 原厂 `boot.img/recovery.img` 是 header v1、4096-byte page，并各含一份 Samsung signer、AVB vbmeta 与分区末 footer；当前 `gts6lwifi-ufs-offline.img` 是 header v0、4096-byte page、6-byte empty ramdisk，不含上述尾部。但这不构成一个已证实的“鉴权硬失败”：
+
+- Project-Aloha 在 gts6l Windows/SD 实机支持时的 commit `9ff4c1f9202b19ef53e68214f25c58718dc6d1f2` 明确使用 header v0、4096-byte page、empty ramdisk和 UEFI+DTB payload。当前固定 builder 沿用该容器路线；本构建仅在临时工作树关闭 payload gzip，以便独立核验 FD/AML 原始字节。
+- 同一台 SM-T860 历史上启动过 TWRP header v1 镜像；该镜像不含 Samsung signer、`AVB0`或分区末 `AVBf`。ABL 日志在 unlocked/orange 路径明确记录 `AUTHENTICATE fail but allow Recovery binary: recovery`，随后进入 ExitBootServices。
+
+因此静态结论是 `boot_image_container_static_support: true`，而不是“当前精确镜像已能通过实机鉴权”。只有当严格 transport 报告绑定本地 TWRP 和 bootloader 日志时，聚合结果才记录 `authentication_path_historically_supported_on_unlocked_device: true`；`exact_current_image_hardware_tested` 始终是 `false`。当前 `.img` 仍然不是可刷写发布物。
+
+## 继续研究的价值与 UFS 硬边界
+
+Project-Aloha PR #239 作者报告 SM-T860 的 SD card 和 touch 在 Windows 中工作，但同一评论警告：Windows 自动修复把除 SDA 外未修复 GPT 的其他 UFS LUN 全部联机后损坏了设备。后续 T860 专属 commit `b36a8226` 的提交信息还记录，测试中关闭 MLVM 后 Windows 仍能启动。这两条上游证据同时支持两个结论：microSD 路线值得继续，UFS0/UFS1 离线则是不可弱化的安全边界。它们不证明本仓库的精确产物可启动。
+
+PR #746 移除的是 LTE `samsung-gts6l`，其说明明确 Wi-Fi `samsung-gts6lwifi` 不受影响；这不改变本项目的目标。
+
+## 可重复门禁
+
+Linux 主机安装固定解析器并运行：
+
+```bash
+python3 -m venv .venv-first-boot
+. .venv-first-boot/bin/activate
+python3 -m pip install uefi_firmware==1.16
+python3 implementation/uefi/validate-first-boot.py
+```
+
+默认输出 `implementation/build/uefi/first-boot-readiness.json`。当前预期为：
+
+- `status: offline_firmware_composition_pass`
+- `offline_firmware_composition_pass: true`
+- `boot_image_container_static_support: true`
+- `authentication_path_historically_supported_on_unlocked_device: false`（默认未提供历史证据报告，不是反证）
+- `exact_current_image_hardware_tested: false`
+- `recovery_boot_trigger_validated: false`
+- `execution_status: blocked-first-boot-execution`
+- Windows 介质、原厂恢复、当前会话恢复传输和精确动作计划四项为 `pending`
+- `external_evidence_trust: local-self-attested-not-execution-authority`
+- `deployable: false`
+- `explicit_device_write_authorization_recorded: false`
+
+缺失外部证据是安全的 `pending`，退出码为 0，表示离线组合复核成功；它不表示可执行。任一静态检查失败，或任一已提供的外部报告不满足严格 schema 时，退出码为 1。
+
+聚合器直接读取并相互绑定：
+
+- 最终 `.fd/.img/AML` 与 source-preparation、UEFI、ACPI 三份报告的固定大小和 SHA-256；
+- `ANDROID!` 头、header/page/ramdisk 字段、完整 FD 与 AML 精确嵌入次数；
+- 最终固件的关键名称/GUID 对、固定 UEFI gitlink/HEAD、固定上游/pinned PostBuild 源码哈希与启动策略源码；
+- Windows schema 2 报告的固定 validator SHA-256 和完整 18 项检查集，包括目标整盘不得是 host boot/system 的 `media.target_disk_safety`、NTFS/ESP 卷盘符与顶层根路径及 BCD 的交叉绑定、三份 EFI 一致性哈希与对应 ARM64 PE 检查的交叉绑定；
+- DWH1 原厂 ZIP、四个 tar.md5 成员和本地五个 critical 文件，并直接记录原厂 boot/recovery 容器结构；
+- 同机历史 transport 的 Heimdall 二进制、PIT/上传日志、后续 Android 启动、TWRP readback、TWRP 镜像结构与 ABL 解锁日志；
+- 当前会话的只读 Download Mode 日志。这一项与历史证据分层，不会被历史成功自动放行。
+
+这些本地 JSON、日志与文件哈希用于发现过期产物、错盘、错架构和不完整检查，属于可复核但可由本机管理员改写的自证材料，不是可信执行证明、签名证明或授权载体。聚合器因此不会仅凭这些材料把本项目提升为可执行状态。
+
+## 实机执行前的全部门槛
+
+1. 在 Windows 主机用固定 `validate-windows-media.ps1` 只读检查实际 Windows 分区和 ESP。报告必须证明两分区位于同一 GPT 可移除物理盘，整盘及其任一分区都不是 host boot/system；且 ARM64 PE、三份 EFI 哈希一致性、QCOM2466 映射、同一 sdbus manifest 中的 descriptor/BootFlags、sdstor BootFlags 和绑定实际盘符的 BCD 语义都通过。
+2. 用 `--stock-recovery-report` 提供 DWH1 本地报告。聚合器重新散列 6.7 GB ZIP 和 `boot.img`、`recovery.img`、`dtbo.img`、`vbmeta.img`、PIT。PIT 只用于分区映射与容量核对，不得刷写或重分区。
+3. 只有单独获得“进入 Download Mode/重启”授权后，才可运行当前会话的只识别、不刷写 drill。未运行时 `current_session.state` 必须是 `not-run`，`flash_attempted` 和 `device_writes_performed` 必须是 `null`，总门禁保持 `pending-current-session-read-only-download-mode-drill`。完成态必须把 `command_argv` 精确绑定到固定 Heimdall 二进制、`download-pit`、唯一输出路径和只读参数；同时绑定当次日志与独立 inode 的 `current-session.pit`，重算 SHA-256，验证 `COM_TAR2`/`SM8150`/76 项结构与固定原厂 PIT 分区布局一致，且日志无上传/flash/重分区标记，才可进入 `pass-recovery-transport-drill`。
+4. 前三项通过后，仍需先建立并单独复核“写入后让这台单槽设备可靠进入 `RECOVERY`”的精确触发方式。`heimdall close-pc-screen --resume` 只保证退出 PC screen/重启，不能证明进入 Recovery；手写 reviewer、时间或命令字符串也不能补足这个缺口。当前代码把 `RECOVERY_BOOT_TRIGGER_VALIDATED` 固定为 `false`，所以任何 action-plan manifest 都不能通过。未来若有实机证据，必须通过新的代码审查显式实现触发参数，再绑定三份外部报告、`.img/.fd/AML` 哈希、唯一目标分区 `RECOVERY`、原厂 `recovery.img` 回退镜像和机器可读停止条件。
+5. 因此当前即使其余外部报告在结构上全部通过，`execution_prerequisites_ready` 仍硬性保持 `false`，`execution_status` 保持 `blocked-first-boot-execution`。未来完成触发路径的独立代码审查后，状态最多只能变为 `awaiting-explicit-device-write-authorization`；用户仍须针对精确镜像、分区、命令和恢复路线另行明确授权。JSON、静态 pass 和“继续”都不能代替该授权。
+
+`deployable`、`device_writes_performed` 和 `explicit_device_write_authorization_recorded` 在聚合结果中始终为 `false`。
+
+示例命令（路径按实际主机调整）：
+
+```bash
+python3 implementation/uefi/validate-first-boot.py \
+  --windows-media-report /path/to/windows-media-validation.json \
+  --stock-recovery-report /path/to/SM-T860-XAR-DWH1/validation.json \
+  --recovery-transport-report /path/to/recovery-transport-evidence.json \
+  --action-plan /path/to/reviewed-first-boot-action-plan.json
+```
+
+## 恢复能力的已知证据与局限
+
+本机历史证据已能证明“从未验证过 transport”的说法不准确：同序列号 SM-T860 的 Heimdall 2.0.2 日志包含 `Session begun`、PIT 下载成功，以及 RECOVERY、BOOT、VBMETA 上传成功；之后有 Android 完成启动、user 0 `RUNNING_UNLOCKED` 与固定 TWRP prefix readback 证据。因此严格绑定后可记为 `pass-historical-sm-t860-heimdall-transport`。
+
+这个 pass 只是历史能力：当时 Heimdall 二进制的来源不可追溯，历史写入和后续 Android 启动不保证当前 USB/设备状态，也不保证未来恢复一定成功。当前会话报告同样只是本地自证材料；它不会替代独立授权或自动产生 action-ready 状态。
+
+microSD 是当前优先研究的 Windows 系统介质，ESP 应包含标准 ARM64 fallback `\EFI\BOOT\BOOTAA64.EFI`。USB Mass Storage 只是固件组合里存在的备用研究方向，不是已验证启动通道。
+
+把精确 UEFI 镜像写入 `RECOVERY` 会覆盖当前 recovery；写入 `BOOT` 则会改变 Android 正常启动路径，因此本项目的 action plan 不允许把 `BOOT` 作为目标。当前精确哈希仍未实机验证。任何计划都不得修改 `BOOT`/`DTBO`/`VBMETA`/PIT，不得重分区、跳过尺寸检查或连续试刷；哈希不符、分区不符、Download Mode 不可用、黑屏/重启循环或主机丢失设备时必须停止。
+
+## 证据来源
+
+- ARM64 Samsung Qualcomm 设备驱动清单：<https://github.com/potassium-os/NP545XLA-kernel/blob/main/docs/dump/NP545XLA-hw-dump/qualcomm-drivers.txt>
+- Windows `sdbus` 组件清单样本：<https://github.com/colorsci/nickel-x64/blob/b3f8c9549e49f2a92b401b3809b210d5f78190ba/WinSxS/Manifests/amd64_dual_sdbus.inf_31bf3856ad364e35_10.0.22621.1_none_31441826756cc490.manifest>
+- Project-Aloha PR #239 的 T860 SD/touch 与 UFS 损坏风险报告：<https://github.com/Project-Aloha/mu_aloha_platforms/pull/239#issuecomment-1986944283>
+- T860 关闭 MLVM 后仍启动的专属提交：<https://github.com/Project-Aloha/mu_aloha_platforms/commit/b36a8226b684e698ff8f9a45172d62db8485a044>
+- 上游 gts6l Android boot v0 packer：<https://github.com/Project-Aloha/mu_aloha_platforms/blob/9ff4c1f9202b19ef53e68214f25c58718dc6d1f2/Platforms/SurfaceDuo1Pkg/PythonLibs/PostBuild.py>
+- 只移除 LTE `samsung-gts6l`、Wi-Fi 版本不受影响的 PR #746：<https://github.com/Project-Aloha/mu_aloha_platforms/pull/746>
+- 官方 SM-T860 TWRP 页面：<https://twrp.me/samsung/samsunggalaxytabs6qcomwifi.html>
+- 固定 UEFI 源码：`research/repos/mu_aloha_platforms` commit `96add763040d86d21f87a4a4022e094e17e6e3c6`
+
+跨设备资料、上游报告和历史本机日志只用于建立路线与风险边界；最终判断仍必须以 SM-T860 的最终 ACPI/固件、目标 Windows ARM64 介质和经单独授权采集的当前会话证据为准。

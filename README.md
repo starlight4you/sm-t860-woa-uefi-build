@@ -44,6 +44,8 @@ chmod +x implementation/uefi/build-gts6lwifi.sh
 
 `implementation/build/acpi-ufs-offline/validation.json` 记录 UFS0/UFS1 `_STA=0`、SDC2 `_STA=15`。这仅建立离线隔离证据，不代表镜像已经可启动或允许刷写。
 
+进一步的 microSD/USB 候选启动链、Windows `ACPI\QCOM2466` 跨设备驱动证据、恢复门槛和可重复检查命令见 [FIRST-BOOT-READINESS.md](FIRST-BOOT-READINESS.md)。`implementation/uefi/validate-first-boot.py` 会直接绑定最终 `.fd/.img/AML`、三份本地报告、关键模块名称/GUID 和固定 UEFI gitlink/HEAD；外部 Windows、原厂恢复、传输与精确动作计划按严格 schema 聚合，不能只凭 `status` 字符串通过。它不会操作设备，也不会生成传输或动作计划。本地报告属于可复核但可改写的自证材料，不是执行授权；而且当前尚无经验证的精确 Recovery 首启触发方式，因此聚合器硬性保持 `execution_prerequisites_ready: false`。静态通过只记为 `offline_firmware_composition_pass`：当前 header v0/4096/empty-ramdisk 容器与已测 gts6l 上游 packer 一致，同机 unlocked ABL 也有允许无 Samsung/AVB 尾部 TWRP recovery 的历史证据；但当前精确镜像从未实机测试，仍然不是可刷写发布物。所有输出始终保持 `deployable: false` 和未授权状态。
+
 ## 安全边界
 
 本仓库只授权离线构建和检查。严禁 `dd`、fastboot、ADB、Odin、Heimdall、写磁盘分区、刷写 boot/recovery/UFS 或重启 T860。
