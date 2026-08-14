@@ -45,6 +45,14 @@ Qualcomm/UEFI 两层 watchdog。预期输出位于
 `Build SM-T860 first-boot diagnostic`；工作流只保留三天的 non-deployable
 诊断证据，不创建 Release。
 
+该诊断镜像已于 2026-08-15 在单独授权下完成一次 RECOVERY-only 真机测试：
+它短暂显示 `UEFI Firmware` 后黑屏并反复复位。随后已经再次恢复固定 DWH1
+RECOVERY。该结果否定了“镜像仅因两层 watchdog 超时而跳回 Download”的假设，
+也证明当前 2026 `main` 构建不能继续作为首启候选。下一步是先对照测试官方
+Project Aloha `2412.74` 的原始 `samsung-gts6lwifi_NOSB.img`，以区分上游端口
+本身的兼容问题和 2412.74 之后的源码/组件回归；精确哈希与门禁记录在
+[FIRST-BOOT-FAILURE-2026-08-14.md](FIRST-BOOT-FAILURE-2026-08-14.md)。
+
 注意确认当前 LLVM 路径。构建脚本会创建临时 Python venv，并在运行 `build_uefi.py` 前显式导出 `CLANGPDB_BIN` 和 `CLANGPDB_AARCH64_PREFIX=aarch64-linux-gnu-`。它不会调用带有 `sudo apt` 和浮动 NuGet 下载的上游 `build_setup.sh`；宿主依赖必须按“环境”一节预先安装。
 
 预期输出：
@@ -65,7 +73,7 @@ Qualcomm/UEFI 两层 watchdog。预期输出位于
 
 进一步的 microSD/USB 候选启动链、Windows `ACPI\QCOM2466` 跨设备驱动证据、恢复门槛和可重复检查命令见 [FIRST-BOOT-READINESS.md](FIRST-BOOT-READINESS.md)；Recovery 人工按键路径的历史证据与未来现场门禁见 [RECOVERY-TRIGGER-DRILL.md](RECOVERY-TRIGGER-DRILL.md)。`implementation/uefi/validate-first-boot.py` 会直接绑定最终 `.fd/.img/AML`、三份本地报告、关键模块名称/GUID 和固定 UEFI gitlink/HEAD；外部 Windows、原厂恢复、历史传输、未来 execution tool、Recovery 触发与精确动作计划按严格 schema 聚合。所有 JSON 全局拒绝重复键；新的 execution provenance/liveness schema 还会逐层拒绝未知键，不能只凭 `status` 或自报布尔值通过。它不会操作设备，也不会生成现场报告或动作计划。
 
-历史 transport schema 2 与来源不明的 Heimdall 2.0.2 证据原样保留，只能证明历史能力，永远不会成为未来动作计划的 binary。未来 execution tool 固定到 SourceHut Heimdall `v2.2.2` 的 tag object、commit、tree、archive SHA-256 和签名 key fingerprint；但当前公钥文件、最终宿主 binary、provenance report 和 liveness report 的预期 SHA-256 都故意未固定，且 pass 验证实现还有独立的 `False` 硬阻断。因而缺报告为 `pending`，结构正确的 Linux x86_64 或 macOS ARM64 离线构建也只会是候选；不得通过机械填哈希解除阻断。后续必须先补齐真实二进制/依赖解析、签名验证、源码到产物绑定、固定 collector/watchdog 和无 TOCTOU 的 executor，再在最终执行宿主上对完全相同 binary SHA-256 另行授权只读 `download-pit` liveness。当前聚合器硬性保持 `execution_prerequisites_ready: false`。静态通过只记为 `offline_firmware_composition_pass`：当前 header v0/4096/empty-ramdisk 容器与已测 gts6l 上游 packer 一致，同机 unlocked ABL 也有允许无 Samsung/AVB 尾部 TWRP recovery 的历史证据；但当前精确镜像从未实机测试，仍然不是可刷写发布物。所有输出始终保持 `deployable: false` 和未授权状态。
+历史 transport schema 2 与来源不明的 Heimdall 2.0.2 证据原样保留，只能证明历史能力，永远不会成为未来动作计划的 binary。未来 execution tool 固定到 SourceHut Heimdall `v2.2.2` 的 tag object、commit、tree、archive SHA-256 和签名 key fingerprint；但当前公钥文件、最终宿主 binary、provenance report 和 liveness report 的预期 SHA-256 都故意未固定，且 pass 验证实现还有独立的 `False` 硬阻断。因而缺报告为 `pending`，结构正确的 Linux x86_64 或 macOS ARM64 离线构建也只会是候选；不得通过机械填哈希解除阻断。后续必须先补齐真实二进制/依赖解析、签名验证、源码到产物绑定、固定 collector/watchdog 和无 TOCTOU 的 executor，再在最终执行宿主上对完全相同 binary SHA-256 另行授权只读 `download-pit` liveness。当前聚合器硬性保持 `execution_prerequisites_ready: false`。静态通过只记为 `offline_firmware_composition_pass`：当前 header v0/4096/empty-ramdisk 容器与已测 gts6l 上游 packer 一致，同机 unlocked ABL 也有允许无 Samsung/AVB 尾部 TWRP recovery 的历史证据；当前精确诊断镜像已经实机失败并完成 stock RECOVERY 回滚，仍然不是可刷写发布物。所有输出始终保持 `deployable: false` 和未授权状态。
 
 [`implementation/uefi/collect-execution-tool-provenance.py`](implementation/uefi/collect-execution-tool-provenance.py) 可将明确提供的本地 v3 构建包、固定源码/Git/GnuPG 原始状态、binary 与 libusb 整理为 13 个独立绑定文件；详细输入和安全边界见 [`COLLECT-EXECUTION-TOOL-PROVENANCE.md`](implementation/uefi/COLLECT-EXECUTION-TOOL-PROVENANCE.md)。它完全离线且绝不运行 Heimdall，不会产生 liveness 或 pass；现有 schema 对 tag/commit 仍只有聚合状态槽，此限制也被明确保留。
 

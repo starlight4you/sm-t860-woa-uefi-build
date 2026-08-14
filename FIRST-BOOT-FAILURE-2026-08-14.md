@@ -52,3 +52,54 @@ The diagnostic artifact remains `deployable: false`. A stall may require a
 manual long-press reboot because automatic watchdog reset is deliberately
 disabled. It is not eligible for another device test until the Linux build,
 recursive FV validation, compressed-payload binding, and artifact review pass.
+
+## Second controlled test — 2026-08-15
+
+The reviewed diagnostic build completed all Linux CI and independent macOS
+validation gates, then was written to **RECOVERY only** under a separate user
+authorization:
+
+- image: `gts6lwifi-first-boot-diagnostic.img`
+- bytes: `2809856`
+- SHA-256: `56fc7e18911f316dcb0e33862e4ccc833bd32d30b937ed9a6557f1bf9e3a3122`
+- source commit: `7f654176a6f403ab4d6f4bc30724b1006b123327`
+- GitHub Actions run: `31821798904`
+
+The tablet briefly displayed text beginning with `UEFI Firmware`, then the
+screen went black and the device repeatedly reset. This proves that ABL accepts
+the Android boot container, BootShim reaches the FD, and framebuffer DEBUG is
+active. Because both firmware watchdog drivers were absent from the exact FD,
+the observation does not support the previous watchdog-timeout hypothesis. It
+instead points to an early EDK2/platform failure or an explicit platform reset.
+
+The exact DWH1 stock recovery listed above was immediately restored to
+**RECOVERY only**. Heimdall reported a successful upload and normal reboot. No
+other partition was written.
+
+## Next binary control
+
+Do not keep tuning the 2026 `main` build without a version control experiment.
+The official Project Aloha `2412.74` SM8150 release differs materially from the
+failed diagnostic FD: its parsed inventory includes `PciHostBridge`,
+`GlinkDxe`, `PmicGlinkDxe`, `OSConfigDxe`, `AdapterInformationDxe`, and other
+components absent from the current-main diagnostic build. The exact official
+NOSB control is therefore the next useful isolation point:
+
+- release: `https://github.com/Project-Aloha/mu_aloha_platforms/releases/tag/2412.74`
+- tag: `994c2a064372aa56213f8ad79bda02d8b8e81c75`
+- release ZIP bytes: `377543917`
+- locally observed release ZIP SHA-256:
+  `7ddc39aac2c92cf3ce341256baad34f34e50cc99af7cca55dd3b27971d724024`
+- `samsung-gts6lwifi_NOSB.img` bytes: `2990080`
+- image SHA-256:
+  `92e0b002b5d14ab47a7851611529e0fa7700a8d160825120a2c2c561306548f5`
+- embedded `SM8150_EFI_NOSB.fd` SHA-256:
+  `119d01594436f83658bb6200c0295f9532b872e20d4130d9069a6c4c936bc394`
+
+The control image independently passes the expected Android v0/page-4096,
+six-byte ramdisk, gzip, 112-byte BootShim, exact-FD, and appended-DTB structure
+checks. It remains non-deployable and is not authorized for device use merely
+by being recorded here. If separately tested on RECOVERY and it boots, the
+regression lies in post-2412.74 source/configuration changes. If it resets in
+the same way, the upstream gts6lwifi port or this tablet's firmware revision is
+the primary compatibility boundary.
