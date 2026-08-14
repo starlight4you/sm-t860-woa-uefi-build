@@ -26,8 +26,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential ca-certificates clang curl gcc-aarch64-linux-gnu \
-            gettext git gnupg iasl lld llvm locales mono-devel nasm nuget \
+            gettext git gnupg iasl lld llvm locales mono-devel nasm \
             python3-git python3-pip python3-venv uuid-dev
+          curl -fL --retry 3 --output "$RUNNER_TEMP/nuget.exe" \
+            https://dist.nuget.org/win-x86-commandline/v6.11.1/nuget.exe
+          echo 'c0ddc9cb0633c4607da7e8028eb4f91248c8b74e45a68b0c79fcfa7d78c2a481  nuget.exe' \
+            | (cd "$RUNNER_TEMP" && sha256sum -c -)
+          sudo install -d -m 0755 /opt/t860-tools
+          sudo install -m 0644 "$RUNNER_TEMP/nuget.exe" /opt/t860-tools/nuget.exe
+          sudo install -m 0755 implementation/uefi/nuget-mono.sh /usr/local/bin/nuget
           python3 --version
           clang --version
           aarch64-linux-gnu-gcc --version
