@@ -6,7 +6,33 @@ workspace="$(cd "$script_dir/../.." && pwd)"
 uefi_source="$workspace/research/repos/mu_aloha_platforms"
 expected_uefi_revision="96add763040d86d21f87a4a4022e094e17e6e3c6"
 aml="$workspace/implementation/build/acpi-ufs-offline/DSDT.aml"
-output_dir="$workspace/implementation/build/uefi"
+
+profile="ufs-offline"
+if [[ $# -eq 2 && "$1" == "--profile" ]]; then
+    profile="$2"
+elif [[ $# -ne 0 ]]; then
+    echo "usage: $0 [--profile ufs-offline|first-boot-diagnostic]" >&2
+    exit 2
+fi
+
+case "$profile" in
+    ufs-offline)
+        output_dir="$workspace/implementation/build/uefi"
+        preparation="$script_dir/prepare-ufs-offline.py"
+        preparation_report="$output_dir/ufs-offline-source-preparation.json"
+        artifact_stem="gts6lwifi-ufs-offline"
+        ;;
+    first-boot-diagnostic)
+        output_dir="$workspace/implementation/build/uefi-first-boot-diagnostic"
+        preparation="$script_dir/prepare-first-boot-diagnostic.py"
+        preparation_report="$output_dir/first-boot-diagnostic-source-preparation.json"
+        artifact_stem="gts6lwifi-first-boot-diagnostic"
+        ;;
+    *)
+        echo "error: unsupported profile: $profile" >&2
+        exit 2
+        ;;
+esac
 
 host_os="$(uname -s)"
 host_arch="$(uname -m)"
@@ -48,6 +74,11 @@ if [[ ! -f "$aml" ]]; then
     exit 2
 fi
 
+if [[ "$profile" == "first-boot-diagnostic" && -e "$output_dir" ]]; then
+    echo "error: refuse existing output directory: $output_dir" >&2
+    echo "Use a fresh checkout or move the previous evidence aside before building." >&2
+    exit 2
+fi
 mkdir -p "$output_dir"
 worktree="$(mktemp -d "${TMPDIR:-/tmp}/t860-uefi-build.XXXXXX")"
 cleanup() {
@@ -62,8 +93,7 @@ build_root="$worktree/mu_aloha_platforms"
 build_venv="$worktree/venv"
 target_aml="$build_root/Platforms/SurfaceDuo1Pkg/Device/samsung-gts6lwifi/ACPI/DSDT.aml"
 install -m 0644 "$aml" "$target_aml"
-python3 "$script_dir/prepare-ufs-offline.py" "$build_root" \
-    --report "$output_dir/ufs-offline-source-preparation.json"
+python3 "$preparation" "$build_root" --report "$preparation_report"
 python3 -m venv "$build_venv"
 
 clang_binary="$(command -v clang)"
@@ -92,6 +122,17 @@ echo "CLANGPDB_AARCH64_PREFIX=$CLANGPDB_AARCH64_PREFIX"
     python ./build_uefi.py -d samsung-gts6lwifi
 ) 2>&1 | tee "$output_dir/build.log"
 
+if [[ "$profile" == "first-boot-diagnostic" ]]; then
+    if ! grep -q -- '-DUSE_SCREEN_FOR_SERIAL_OUTPUT=1' "$output_dir/build.log"; then
+        echo "error: diagnostic build log does not prove framebuffer serial output" >&2
+        exit 1
+    fi
+    if grep -q -- '-DUSE_SCREEN_FOR_SERIAL_OUTPUT=0' "$output_dir/build.log"; then
+        echo "error: diagnostic build log contains a screen-serial-disabled compile" >&2
+        exit 1
+    fi
+fi
+
 firmware="$(find "$build_root/Build/SurfaceDuo1Pkg" -type f -name 'SM8150_EFI.fd' -print -quit)"
 boot_image="$build_root/Build/SurfaceDuo1Pkg/samsung-gts6lwifi.img"
 if [[ -z "$firmware" || ! -s "$firmware" || ! -s "$boot_image" ]]; then
@@ -99,11 +140,11 @@ if [[ -z "$firmware" || ! -s "$firmware" || ! -s "$boot_image" ]]; then
     exit 1
 fi
 
-install -m 0644 "$firmware" "$output_dir/gts6lwifi-ufs-offline.fd"
-install -m 0644 "$boot_image" "$output_dir/gts6lwifi-ufs-offline.img"
+install -m 0644 "$firmware" "$output_dir/$artifact_stem.fd"
+install -m 0644 "$boot_image" "$output_dir/$artifact_stem.img"
 "$build_venv/bin/python" "$script_dir/validate.py" \
-    --profile ufs-offline \
-    --firmware "$output_dir/gts6lwifi-ufs-offline.fd" \
-    --boot-image "$output_dir/gts6lwifi-ufs-offline.img"
+    --profile "$profile" \
+    --firmware "$output_dir/$artifact_stem.fd" \
+    --boot-image "$output_dir/$artifact_stem.img"
 
-echo "UFS-offline UEFI artifacts were built and verified offline. They remain non-deployable."
+echo "$profile UEFI artifacts were built and verified offline. They remain non-deployable."

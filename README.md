@@ -26,6 +26,25 @@ chmod +x implementation/uefi/build-gts6lwifi.sh
 ./implementation/uefi/build-gts6lwifi.sh
 ```
 
+2026-08-14 的首次真机测试已经证明原 UFS-offline 镜像会在首屏后复位到
+Download mode；随后仅恢复 DWH1 RECOVERY，Android 已正常启动。该失败镜像不得
+原样重刷，精确结果见 [FIRST-BOOT-FAILURE-2026-08-14.md](FIRST-BOOT-FAILURE-2026-08-14.md)。
+
+修复后的诊断构建使用独立输出目录：
+
+```bash
+./implementation/uefi/build-gts6lwifi.sh --profile first-boot-diagnostic
+```
+
+它恢复上游压缩 FV/gzip boot payload 布局，同步关闭 UFSDxe、UFS IOC 和 UFS
+SMMU 初始化，保留 SdccDxe，打开 framebuffer DEBUG，并仅在诊断版中移除
+Qualcomm/UEFI 两层 watchdog。预期输出位于
+`implementation/build/uefi-first-boot-diagnostic/`，仍为 `deployable: false`；
+若固件卡住，因 watchdog 已关闭，可能需要长按按键强制重启。本机构建环境
+不符合 Linux x86_64 门禁时，可从 GitHub Actions 手动运行
+`Build SM-T860 first-boot diagnostic`；工作流只保留三天的 non-deployable
+诊断证据，不创建 Release。
+
 注意确认当前 LLVM 路径。构建脚本会创建临时 Python venv，并在运行 `build_uefi.py` 前显式导出 `CLANGPDB_BIN` 和 `CLANGPDB_AARCH64_PREFIX=aarch64-linux-gnu-`。它不会调用带有 `sudo apt` 和浮动 NuGet 下载的上游 `build_setup.sh`；宿主依赖必须按“环境”一节预先安装。
 
 预期输出：
@@ -40,7 +59,7 @@ chmod +x implementation/uefi/build-gts6lwifi.sh
 
 构建后固定安装 `uefi_firmware==1.16`，递归解析压缩 FV；二进制中不得存在 `UFSDxe` GUID/名称，必须存在 `SdccDxe`。验证状态应为 `pass-ufs-offline-uefi-build`，并确认 `.fd` 和 `.img` 都精确包含该 AML，boot image 精确包含一次 `.fd`。所有产物仍是 `deployable: false`。
 
-提交 `cbe1074` 中的 `dist-gts6lwifi-ufs-offline/` 是首个通过上述静态门槛的参考产物。它仍然只用于离线分析，不是可刷写发布包。
+提交 `cbe1074` 中的 `dist-gts6lwifi-ufs-offline/` 是首个通过上述静态门槛的参考产物。它已经在真机首屏后失败并完成原厂 RECOVERY 回滚，只能作为失败证据，不是可刷写发布包。
 
 `implementation/build/acpi-ufs-offline/validation.json` 记录 UFS0/UFS1 `_STA=0`、SDC2 `_STA=15`。这仅建立离线隔离证据，不代表镜像已经可启动或允许刷写。
 

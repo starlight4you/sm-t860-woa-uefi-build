@@ -10,6 +10,12 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+from first_boot_diagnostic_validation import (
+    guid_string,
+    validate_compressed_boot_image,
+    walk_objects,
+)
+
 
 WORKSPACE = Path(__file__).resolve().parents[2]
 BASELINE_AML = WORKSPACE / "implementation/build/acpi/DSDT.aml"
@@ -22,9 +28,18 @@ REFERENCE_AML = (
 )
 BASELINE_OUTPUT = WORKSPACE / "implementation/build/uefi/integration-validation.json"
 UFS_OFFLINE_OUTPUT = WORKSPACE / "implementation/build/uefi/ufs-offline-validation.json"
+DIAGNOSTIC_OUTPUT = (
+    WORKSPACE
+    / "implementation/build/uefi-first-boot-diagnostic/first-boot-diagnostic-validation.json"
+)
 EXPECTED_REFERENCE_SHA256 = (
     "a710f7a40002babe7f3c7de78093fffa6dd2c5078a19d3a3c7a76b0d0e72c698"
 )
+ACPI_FILE_GUID = "7e374e25-8e01-4fee-87f2-390c23c606cd"
+UFS_GUID = "0d35cd8e-97ea-4f9a-96af-0f0d89f76567"
+SDCC_GUID = "f10f76db-42c1-533f-34a8-69be24653110"
+QCOM_WDOG_GUID = "040e1e61-0afb-411b-9ec9-00f3fc59cc13"
+UEFI_WDOG_GUID = "f099d67f-71ae-4c36-b2a3-dceb0eb2b7d8"
 
 
 def sha256_bytes(data: bytes) -> str:
@@ -50,7 +65,11 @@ def artifact_record(path: Path, needle: bytes | None = None) -> dict[str, object
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--profile", choices=("baseline", "ufs-offline"), default="baseline")
+parser.add_argument(
+    "--profile",
+    choices=("baseline", "ufs-offline", "first-boot-diagnostic"),
+    default="baseline",
+)
 parser.add_argument("--firmware", type=Path)
 parser.add_argument("--boot-image", type=Path)
 args = parser.parse_args()
@@ -58,8 +77,12 @@ args = parser.parse_args()
 if (args.firmware is None) != (args.boot_image is None):
     raise SystemExit("validation failed: --firmware and --boot-image must be supplied together")
 
-AML = UFS_OFFLINE_AML if args.profile == "ufs-offline" else BASELINE_AML
-OUTPUT = UFS_OFFLINE_OUTPUT if args.profile == "ufs-offline" else BASELINE_OUTPUT
+AML = UFS_OFFLINE_AML if args.profile != "baseline" else BASELINE_AML
+OUTPUT = {
+    "baseline": BASELINE_OUTPUT,
+    "ufs-offline": UFS_OFFLINE_OUTPUT,
+    "first-boot-diagnostic": DIAGNOSTIC_OUTPUT,
+}[args.profile]
 
 for required in (AML, ACPI_INCLUDE, REFERENCE_AML):
     if not required.is_file():
@@ -108,9 +131,11 @@ if args.firmware is not None:
     firmware = args.firmware.resolve()
     if not firmware.is_file():
         raise SystemExit(f"validation failed: firmware artifact missing: {firmware}")
-    result["firmware"] = artifact_record(firmware, aml)
+    result["firmware"] = artifact_record(
+        firmware, aml if args.profile != "first-boot-diagnostic" else None
+    )
 
-    if args.profile == "ufs-offline":
+    if args.profile != "baseline":
         try:
             from uefi_firmware import AutoParser
         except ImportError as exc:
@@ -146,45 +171,97 @@ if args.firmware is not None:
                     walk(child)
 
         walk(inventory)
-        ufs_guid = "0d35cd8e-97ea-4f9a-96af-0f0d89f76567"
-        sdcc_guid = "f10f76db-42c1-533f-34a8-69be24653110"
-        ufs_present = "UFSDxe" in names or ufs_guid in guids
-        sdcc_present = "SdccDxe" in names and sdcc_guid in guids
+        ufs_present = "UFSDxe" in names or UFS_GUID in guids
+        sdcc_present = "SdccDxe" in names and SDCC_GUID in guids
         if ufs_present:
             raise SystemExit("validation failed: UFSDxe remains in UFS-offline firmware")
         if not sdcc_present:
             raise SystemExit("validation failed: SdccDxe missing from UFS-offline firmware")
         result["firmware_driver_inventory"] = {
             "parser": f"uefi_firmware {parser_version}",
-            "ufs_driver_guid": ufs_guid,
+            "ufs_driver_guid": UFS_GUID,
             "ufs_driver_present": False,
-            "sdcc_driver_guid": sdcc_guid,
+            "sdcc_driver_guid": SDCC_GUID,
             "sdcc_driver_present": True,
         }
+
+        if args.profile == "first-boot-diagnostic":
+            parsed_objects = list(walk_objects(parsed))
+            acpi_files = [
+                obj
+                for obj in parsed_objects
+                if obj.__class__.__name__ == "FirmwareFile"
+                and guid_string(getattr(obj, "guid", None)) == ACPI_FILE_GUID
+            ]
+            if len(acpi_files) != 1:
+                raise SystemExit(
+                    "validation failed: expected one parsed ACPI firmware file, "
+                    f"found {len(acpi_files)}"
+                )
+            exact_aml_sections = [
+                obj
+                for obj in walk_objects(acpi_files[0])
+                if obj.__class__.__name__ == "FirmwareFileSystemSection"
+                and getattr(obj, "data", None) == aml
+            ]
+            if len(exact_aml_sections) != 1:
+                raise SystemExit(
+                    "validation failed: compressed ACPI firmware file must contain "
+                    f"the exact safety DSDT once, found {len(exact_aml_sections)}"
+                )
+            qcom_wdog_present = (
+                "QcomWDogDxe" in names or QCOM_WDOG_GUID in guids
+            )
+            uefi_wdog_present = (
+                "WatchdogTimer" in names or UEFI_WDOG_GUID in guids
+            )
+            if qcom_wdog_present or uefi_wdog_present:
+                raise SystemExit(
+                    "validation failed: a watchdog driver remains in diagnostic firmware"
+                )
+            result["firmware"]["compressed_acpi_file_guid"] = ACPI_FILE_GUID
+            result["firmware"]["parsed_exact_aml_sections"] = 1
+            result["firmware_driver_inventory"].update(
+                {
+                    "qcom_watchdog_guid": QCOM_WDOG_GUID,
+                    "qcom_watchdog_present": False,
+                    "uefi_watchdog_guid": UEFI_WDOG_GUID,
+                    "uefi_watchdog_present": False,
+                }
+            )
 
 if args.boot_image is not None:
     boot_image = args.boot_image.resolve()
     if not boot_image.is_file():
         raise SystemExit(f"validation failed: boot image missing: {boot_image}")
-    result["boot_image"] = artifact_record(boot_image, aml)
+    result["boot_image"] = artifact_record(
+        boot_image, aml if args.profile != "first-boot-diagnostic" else None
+    )
     boot_data = boot_image.read_bytes()
     firmware_data = firmware.read_bytes()
     if not boot_data.startswith(b"ANDROID!"):
         raise SystemExit("validation failed: boot image lacks ANDROID! header")
-    firmware_occurrences = boot_data.count(firmware_data)
-    if firmware_occurrences != 1:
-        raise SystemExit(
-            "validation failed: boot image must embed the exact firmware once, "
-            f"found {firmware_occurrences}"
-        )
-    result["boot_image"]["embedded_exact_firmware_occurrences"] = firmware_occurrences
+    if args.profile == "first-boot-diagnostic":
+        try:
+            compressed = validate_compressed_boot_image(boot_data, firmware_data)
+        except ValueError as exc:
+            raise SystemExit(f"validation failed: {exc}") from exc
+        result["boot_image"].update(compressed)
+    else:
+        firmware_occurrences = boot_data.count(firmware_data)
+        if firmware_occurrences != 1:
+            raise SystemExit(
+                "validation failed: boot image must embed the exact firmware once, "
+                f"found {firmware_occurrences}"
+            )
+        result["boot_image"]["embedded_exact_firmware_occurrences"] = firmware_occurrences
 
 if args.firmware is not None and args.boot_image is not None:
-    result["status"] = (
-        "pass-ufs-offline-uefi-build"
-        if args.profile == "ufs-offline"
-        else "pass-offline-uefi-build"
-    )
+    result["status"] = {
+        "baseline": "pass-offline-uefi-build",
+        "ufs-offline": "pass-ufs-offline-uefi-build",
+        "first-boot-diagnostic": "pass-first-boot-diagnostic-uefi-build",
+    }[args.profile]
 
 OUTPUT.parent.mkdir(parents=True, exist_ok=True)
 OUTPUT.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")

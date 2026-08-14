@@ -1,3 +1,4 @@
 implementation/build/uefi/
+implementation/build/uefi-first-boot-diagnostic/
 __pycache__/
 *.pyc

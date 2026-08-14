@@ -1,0 +1,66 @@
+name: Build SM-T860 first-boot diagnostic
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sm-t860-first-boot-diagnostic-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Check out the exact reviewed tree
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Install fixed-host build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential ca-certificates clang curl gcc-aarch64-linux-gnu \
+            gettext git gnupg iasl lld llvm locales mono-devel nasm nuget \
+            python3-git python3-pip python3-venv uuid-dev
+          python3 --version
+          clang --version
+          aarch64-linux-gnu-gcc --version
+          mono --version
+          command -v nuget
+
+      - name: Verify repository inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          while read -r expected relative; do
+            actual="$(sha256sum "$relative" | cut -d' ' -f1)"
+            test "$actual" = "$expected"
+          done < INPUTS.sha256
+
+      - name: Build and recursively validate diagnostic image
+        run: ./implementation/uefi/build-gts6lwifi.sh --profile first-boot-diagnostic
+
+      - name: Freeze artifact checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          output=implementation/build/uefi-first-boot-diagnostic
+          find "$output" -maxdepth 1 -type f ! -name SHA256SUMS.txt -printf '%f\n' \
+            | LC_ALL=C sort \
+            | while read -r file; do sha256sum "$output/$file"; done \
+            > "$output/SHA256SUMS.txt"
+          (cd "$output" && sha256sum -c SHA256SUMS.txt)
+
+      - name: Upload non-deployable diagnostic evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sm-t860-first-boot-diagnostic-${{ github.sha }}
+          path: implementation/build/uefi-first-boot-diagnostic/
+          if-no-files-found: error
+          retention-days: 3
