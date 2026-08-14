@@ -51,10 +51,11 @@ class FirstBootDiagnosticPreparationTests(unittest.TestCase):
             encoding="utf-8",
         )
         platform = root / "Platforms/SurfaceDuo1Pkg"
-        (platform / "SurfaceDuo1.dsc").write_text(
-            "  USE_SCREEN_FOR_SERIAL_OUTPUT    = 0\n",
-            encoding="utf-8",
-        )
+        for name in ("SurfaceDuo1.dsc", "SurfaceDuo1NoSb.dsc"):
+            (platform / name).write_text(
+                "  USE_SCREEN_FOR_SERIAL_OUTPUT    = 0\n",
+                encoding="utf-8",
+            )
         (platform / "SurfaceDuo1.fdf").write_text(
             f"  INF {UEFI_WDOG}\n",
             encoding="utf-8",
@@ -89,12 +90,13 @@ class FirstBootDiagnosticPreparationTests(unittest.TestCase):
             self.assertNotIn(f"INF {UFS}\n", all_text)
             self.assertNotIn(f"INF {QCOM_WDOG}\n", all_text)
             self.assertIn(SDCC, all_text)
-            self.assertIn(
-                "USE_SCREEN_FOR_SERIAL_OUTPUT    = 1",
-                (root / "Platforms/SurfaceDuo1Pkg/SurfaceDuo1.dsc").read_text(
-                    encoding="utf-8"
-                ),
-            )
+            for name in ("SurfaceDuo1.dsc", "SurfaceDuo1NoSb.dsc"):
+                self.assertIn(
+                    "USE_SCREEN_FOR_SERIAL_OUTPUT    = 1",
+                    (root / "Platforms/SurfaceDuo1Pkg" / name).read_text(
+                        encoding="utf-8"
+                    ),
+                )
             config = (
                 root / DEVICE / "Library/PlatformConfigurationMapLib/PlatformConfigurationMapLib.c"
             ).read_text(encoding="utf-8")

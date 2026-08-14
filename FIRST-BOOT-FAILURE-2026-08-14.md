@@ -45,7 +45,7 @@ The new `first-boot-diagnostic` profile therefore:
 1. restores the upstream compressed FV and gzip boot-payload layout;
 2. removes UFSDxe and also sets both UFS initialization switches to zero;
 3. preserves SdccDxe for the microSD path;
-4. enables framebuffer DEBUG output;
+4. enables framebuffer DEBUG output in both secure-boot and no-secure-boot DSCs;
 5. removes Qualcomm and generic UEFI watchdog drivers for this diagnostic build.
 
 The diagnostic artifact remains `deployable: false`. A stall may require a

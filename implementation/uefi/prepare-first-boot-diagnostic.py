@@ -15,7 +15,10 @@ from pathlib import Path
 
 
 DEVICE = Path("Platforms/SurfaceDuo1Pkg/Device/samsung-gts6lwifi")
-PLATFORM_DSC = Path("Platforms/SurfaceDuo1Pkg/SurfaceDuo1.dsc")
+PLATFORM_DSCS = (
+    Path("Platforms/SurfaceDuo1Pkg/SurfaceDuo1.dsc"),
+    Path("Platforms/SurfaceDuo1Pkg/SurfaceDuo1NoSb.dsc"),
+)
 PLATFORM_FDF = Path("Platforms/SurfaceDuo1Pkg/SurfaceDuo1.fdf")
 CONFIG_MAP = DEVICE / "Library/PlatformConfigurationMapLib/PlatformConfigurationMapLib.c"
 BOOTPACK = DEVICE / "bootpack.json"
@@ -116,13 +119,13 @@ generic_watchdog_removed = {
     str(PLATFORM_FDF): disable_inf(fdf, UEFI_WDOG_INF, "NO_UEFI_WDOG", 1),
 }
 
-dsc = root / PLATFORM_DSC
-replace_once(
-    dsc,
-    "  USE_SCREEN_FOR_SERIAL_OUTPUT    = 0\n",
-    "  USE_SCREEN_FOR_SERIAL_OUTPUT    = 1\n",
-    "screen serial setting",
-)
+for relative in PLATFORM_DSCS:
+    replace_once(
+        root / relative,
+        "  USE_SCREEN_FOR_SERIAL_OUTPUT    = 0\n",
+        "  USE_SCREEN_FOR_SERIAL_OUTPUT    = 1\n",
+        f"screen serial setting in {relative.name}",
+    )
 
 config_map = root / CONFIG_MAP
 replace_once(
@@ -140,6 +143,7 @@ replace_once(
 
 report["diagnostic_controls"] = {
     "screen_serial_output": True,
+    "screen_serial_platform_descriptors": [str(path) for path in PLATFORM_DSCS],
     "memory_serial_output": False,
     "ufs_driver_present": False,
     "enable_ufs_ioc": 0,
