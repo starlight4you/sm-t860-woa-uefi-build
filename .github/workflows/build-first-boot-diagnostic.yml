@@ -58,11 +58,14 @@ jobs:
         run: |
           set -euo pipefail
           output=implementation/build/uefi-first-boot-diagnostic
-          find "$output" -maxdepth 1 -type f ! -name SHA256SUMS.txt -printf '%f\n' \
-            | LC_ALL=C sort \
-            | while read -r file; do sha256sum "$output/$file"; done \
-            > "$output/SHA256SUMS.txt"
-          (cd "$output" && sha256sum -c SHA256SUMS.txt)
+          (
+            cd "$output"
+            find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -printf '%f\n' \
+              | LC_ALL=C sort \
+              | while read -r file; do sha256sum "$file"; done \
+              > SHA256SUMS.txt
+            sha256sum -c SHA256SUMS.txt
+          )
 
       - name: Upload non-deployable diagnostic evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
