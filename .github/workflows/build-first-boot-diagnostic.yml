@@ -1,4 +1,4 @@
-name: Build SM-T860 SM8150 MTP SdccDxe A/B diagnostic
+name: Build SM-T860 SdccDxe dispatch/depex diagnostic
 
 on:
   workflow_dispatch:
@@ -45,18 +45,18 @@ jobs:
           mono --version
           command -v nuget
 
-      - name: Verify reviewed SM8150 MTP SdccDxe A/B inputs
+      - name: Verify reviewed SdccDxe dispatch diagnostic inputs
         shell: bash
         run: sha256sum -c SD-FIRST-2412.74-INPUTS.sha256
 
-      - name: Build exact 2412.74 source with fixed SM8150 MTP SdccDxe
+      - name: Build exact 2412.74 source with SdccDxe dispatch diagnostics
         run: ./implementation/uefi/build-sd-first-2412.74.sh
 
       - name: Freeze artifact checksums
         shell: bash
         run: |
           set -euo pipefail
-          output=implementation/build/uefi-sm8150-mtp-sdcc-ab-2412.74
+          output=implementation/build/uefi-sdcc-dispatch-depex-2412.74
           (
             cd "$output"
             find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -printf '%f\n' \
@@ -69,7 +69,7 @@ jobs:
       - name: Upload non-deployable diagnostic evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: sm-t860-2412.74-sm8150-mtp-sdcc-ab-${{ github.sha }}
-          path: implementation/build/uefi-sm8150-mtp-sdcc-ab-2412.74/
+          name: sm-t860-2412.74-sdcc-dispatch-depex-${{ github.sha }}
+          path: implementation/build/uefi-sdcc-dispatch-depex-2412.74/
           if-no-files-found: error
           retention-days: 3
