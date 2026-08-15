@@ -1,0 +1,50 @@
+name: Build SM-T860 2412.74 SD-first diagnostic
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sm-t860-2412-74-sd-first-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Check out reviewed wrapper
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
+
+      - name: Install build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential ca-certificates clang curl gcc-aarch64-linux-gnu \
+            gettext git iasl lld llvm locales mono-devel nasm \
+            python3-git python3-pip python3-venv uuid-dev
+          curl -fL --retry 3 --output "$RUNNER_TEMP/nuget.exe" \
+            https://dist.nuget.org/win-x86-commandline/v6.11.1/nuget.exe
+          echo 'c0ddc9cb0633c4607da7e8028eb4f91248c8b74e45a68b0c79fcfa7d78c2a481  nuget.exe' \
+            | (cd "$RUNNER_TEMP" && sha256sum -c -)
+          sudo install -d -m 0755 /opt/t860-tools
+          sudo install -m 0644 "$RUNNER_TEMP/nuget.exe" /opt/t860-tools/nuget.exe
+          sudo install -m 0755 implementation/uefi/nuget-mono.sh /usr/local/bin/nuget
+
+      - name: Verify reviewed wrapper inputs
+        run: sha256sum -c SD-FIRST-2412.74-INPUTS.sha256
+
+      - name: Build exact 2412.74 source with reviewed SD-first patch
+        run: ./implementation/uefi/build-sd-first-2412.74.sh
+
+      - name: Upload non-deployable diagnostic evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sm-t860-2412.74-sd-first-${{ github.sha }}
+          path: implementation/build/uefi-sd-first-2412.74/
+          if-no-files-found: error
+          retention-days: 3
