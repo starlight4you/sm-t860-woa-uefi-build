@@ -43,11 +43,19 @@ def main() -> int:
         b'#include "MsBootPolicy.h"'
         + eol
         + eol
-        + b"#include <Library/MsPlatformDevicesLib.h>"
+        + b"EFI_DEVICE_PATH_PROTOCOL *"
+        + eol
+        + b"EFIAPI"
+        + eol
+        + b"GetSdCardDevicePath ("
+        + eol
+        + b"  VOID"
+        + eol
+        + b"  );"
         + eol
         + eol
         + b"#define USB_DRIVE_SECOND_CHANCE_DELAY_S",
-        "platform-devices include",
+        "SD-card device-path declaration",
     )
     data = replace_once(
         data,
