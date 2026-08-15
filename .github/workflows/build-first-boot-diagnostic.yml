@@ -19,7 +19,6 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 1
-          submodules: recursive
 
       - name: Install fixed-host build prerequisites
         run: |
@@ -43,21 +42,16 @@ jobs:
 
       - name: Verify repository inputs
         shell: bash
-        run: |
-          set -euo pipefail
-          while read -r expected relative; do
-            actual="$(sha256sum "$relative" | cut -d' ' -f1)"
-            test "$actual" = "$expected"
-          done < INPUTS.sha256
+        run: sha256sum -c SD-FIRST-2412.74-INPUTS.sha256
 
-      - name: Build and recursively validate diagnostic image
-        run: ./implementation/uefi/build-gts6lwifi.sh --profile first-boot-diagnostic
+      - name: Build exact 2412.74 source with SD-first policy
+        run: ./implementation/uefi/build-sd-first-2412.74.sh
 
       - name: Freeze artifact checksums
         shell: bash
         run: |
           set -euo pipefail
-          output=implementation/build/uefi-first-boot-diagnostic
+          output=implementation/build/uefi-sd-first-2412.74
           (
             cd "$output"
             find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -printf '%f\n' \
@@ -70,7 +64,7 @@ jobs:
       - name: Upload non-deployable diagnostic evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: sm-t860-first-boot-diagnostic-${{ github.sha }}
-          path: implementation/build/uefi-first-boot-diagnostic/
+          name: sm-t860-2412.74-sd-first-${{ github.sha }}
+          path: implementation/build/uefi-sd-first-2412.74/
           if-no-files-found: error
           retention-days: 3
