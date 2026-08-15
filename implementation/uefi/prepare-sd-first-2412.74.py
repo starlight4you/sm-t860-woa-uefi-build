@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Patch Project Aloha 2412.74 to boot a marker-identified microSD only."""
+"""Patch Project Aloha 2412.74 for read-only SM-T860 SDCC2 diagnostics."""
 
 from __future__ import annotations
 
@@ -44,9 +44,11 @@ def main() -> int:
         + eol
         + b"#include <Protocol/BlockIo.h>"
         + eol
+        + b"#include <Library/IoLib.h>"
+        + eol
         + eol
         + b"#define USB_DRIVE_SECOND_CHANCE_DELAY_S",
-        "BlockIo protocol include",
+        "BlockIo and read-only MMIO includes",
     )
 
     data = replace_once(
@@ -154,6 +156,71 @@ def main() -> int:
             b"",
             b"  Print (L\"    %s\\r\\n\", Text);",
             b"  FreePool (Text);",
+            b"}",
+            b"",
+            b"STATIC",
+            b"VOID",
+            b"DiagnoseSdcc2Hardware (",
+            b"  VOID",
+            b"  )",
+            b"{",
+            b"  UINT32  CardDetectCtl;",
+            b"  UINT32  CardDetectIo;",
+            b"  UINT32  ClockAppsCbcr;",
+            b"  UINT32  ClockAhbCbcr;",
+            b"  UINT32  ClockCmdRcgr;",
+            b"  UINT32  ClockCfgRcgr;",
+            b"  UINT32  PresentState;",
+            b"  UINT32  HostPower;",
+            b"  UINT32  ClockReset;",
+            b"  UINT32  InterruptStatus;",
+            b"  UINT32  Capabilities0;",
+            b"  UINT32  Capabilities1;",
+            b"  UINT16  HostVersion;",
+            b"",
+            b"  // SM-T860 Android DTS: SDHCI2=0x08804000 and active-low card detect=TLMM GPIO96.",
+            b"  // These are read-only diagnostics. No GPIO, clock, regulator, or controller register is written.",
+            b"  CardDetectCtl  = MmioRead32 (0x03960000);",
+            b"  CardDetectIo   = MmioRead32 (0x03960004);",
+            b"  ClockAppsCbcr  = MmioRead32 (0x00114004);",
+            b"  ClockAhbCbcr   = MmioRead32 (0x00114008);",
+            b"  ClockCmdRcgr   = MmioRead32 (0x0011400C);",
+            b"  ClockCfgRcgr   = MmioRead32 (0x00114010);",
+            b"  PresentState   = MmioRead32 (0x08804024);",
+            b"  HostPower      = MmioRead32 (0x08804028);",
+            b"  ClockReset     = MmioRead32 (0x0880402C);",
+            b"  InterruptStatus = MmioRead32 (0x08804030);",
+            b"  Capabilities0  = MmioRead32 (0x08804040);",
+            b"  Capabilities1  = MmioRead32 (0x08804044);",
+            b"  HostVersion    = MmioRead16 (0x088040FE);",
+            b"",
+            b"  Print (L\"SDCC2 read-only register diagnostic:\\r\\n\");",
+            b"  Print (",
+            b"    L\" GPIO96 CTL=%08x IO=%08x inserted(active-low)=%d\\r\\n\",",
+            b"    CardDetectCtl,",
+            b"    CardDetectIo,",
+            b"    ((CardDetectIo & BIT0) == 0)",
+            b"    );",
+            b"  Print (",
+            b"    L\" GCC apps=%08x ahb=%08x cmd=%08x cfg=%08x\\r\\n\",",
+            b"    ClockAppsCbcr,",
+            b"    ClockAhbCbcr,",
+            b"    ClockCmdRcgr,",
+            b"    ClockCfgRcgr",
+            b"    );",
+            b"  Print (",
+            b"    L\" SDHCI present=%08x host/pwr=%08x clk/rst=%08x int=%08x\\r\\n\",",
+            b"    PresentState,",
+            b"    HostPower,",
+            b"    ClockReset,",
+            b"    InterruptStatus",
+            b"    );",
+            b"  Print (",
+            b"    L\" SDHCI caps=%08x/%08x version=%04x\\r\\n\",",
+            b"    Capabilities0,",
+            b"    Capabilities1,",
+            b"    HostVersion",
+            b"    );",
             b"}",
             b"",
             b"STATIC",
@@ -334,6 +401,7 @@ def main() -> int:
             b"",
             b"        Print (L\"\\r\\nT860 MICROSD MARKER BOOT DIAGNOSTIC\\r\\n\");",
             b"        Print (L\"Looking for \\\\startup.nsh; internal UFS fallback is disabled.\\r\\n\");",
+            b"        DiagnoseSdcc2Hardware ();",
             b"        DiagnoseStorageHandles ();",
             b"        Status = SelectAndBootDevice (&gEfiSimpleFileSystemProtocolGuid, FilterOnlySD);",
             b"        Print (L\"\\r\\nSD boot did not transfer control: %r\\r\\n\", Status);",
@@ -351,6 +419,16 @@ def main() -> int:
     inf_eol = b"\r\n" if b"\r\n" in inf_data else b"\n"
     inf_data = replace_once(
         inf_data,
+        b"[LibraryClasses]" + inf_eol + b"  DevicePathLib",
+        b"[LibraryClasses]"
+        + inf_eol
+        + b"  IoLib"
+        + inf_eol
+        + b"  DevicePathLib",
+        "IoLib dependency",
+    )
+    inf_data = replace_once(
+        inf_data,
         b"[Protocols]" + inf_eol + b"  gEfiSimpleFileSystemProtocolGuid",
         b"[Protocols]"
         + inf_eol
@@ -364,8 +442,22 @@ def main() -> int:
     after = {str(path.relative_to(root)): sha256(path) for path in (source, inf)}
     report = {
         "schema": 1,
-        "profile": "project-aloha-2412.74-sd-blockio-diagnostic",
-        "purpose": "enumerate SimpleFS and candidate BlockIO media, then boot only a root startup.nsh volume",
+        "profile": "project-aloha-2412.74-sdcc2-register-diagnostic",
+        "purpose": "read SM-T860 SDCC2/GPIO96/GCC registers, enumerate storage, then boot only a root startup.nsh volume",
+        "mmio_reads": {
+            "gcc_sdcc2": ["0x00114004", "0x00114008", "0x0011400c", "0x00114010"],
+            "sdhci2": [
+                "0x08804024",
+                "0x08804028",
+                "0x0880402c",
+                "0x08804030",
+                "0x08804040",
+                "0x08804044",
+                "0x088040fe",
+            ],
+            "tlmm_gpio96": ["0x03960000", "0x03960004"],
+        },
+        "mmio_writes": [],
         "files_before": before,
         "files_after": after,
         "device_writes_performed": False,

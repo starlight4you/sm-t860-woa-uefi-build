@@ -1,4 +1,4 @@
-name: Build SM-T860 2412.74 SD-BlockIO diagnostic
+name: Build SM-T860 2412.74 SDCC2 register diagnostic
 
 on:
   workflow_dispatch:
@@ -43,13 +43,13 @@ jobs:
       - name: Verify reviewed wrapper inputs
         run: sha256sum -c SD-FIRST-2412.74-INPUTS.sha256
 
-      - name: Build exact 2412.74 source with reviewed SD-BlockIO patch
+      - name: Build exact 2412.74 source with reviewed read-only SDCC2 patch
         run: ./implementation/uefi/build-sd-first-2412.74.sh
 
       - name: Upload non-deployable diagnostic evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: sm-t860-2412.74-sd-blockio-${{ github.sha }}
-          path: implementation/build/uefi-sd-blockio-2412.74/
+          name: sm-t860-2412.74-sdcc2-registers-${{ github.sha }}
+          path: implementation/build/uefi-sdcc2-registers-2412.74/
           if-no-files-found: error
           retention-days: 3

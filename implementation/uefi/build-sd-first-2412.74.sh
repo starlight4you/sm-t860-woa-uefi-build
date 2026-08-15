@@ -3,7 +3,7 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "$0")" && pwd)"
 workspace="$(cd "$script_dir/../.." && pwd)"
-output_dir="$workspace/implementation/build/uefi-sd-blockio-2412.74"
+output_dir="$workspace/implementation/build/uefi-sdcc2-registers-2412.74"
 preparation="$script_dir/prepare-sd-first-2412.74.py"
 
 source_url="https://github.com/Project-Aloha/mu_aloha_platforms.git"
@@ -73,11 +73,11 @@ if [[ -z "$firmware" || ! -s "$firmware" || ! -s "$boot_image" ]]; then
     exit 1
 fi
 
-install -m 0644 "$firmware" "$output_dir/gts6lwifi-2412.74-sd-blockio.fd"
-install -m 0644 "$boot_image" "$output_dir/gts6lwifi-2412.74-sd-blockio.img"
+install -m 0644 "$firmware" "$output_dir/gts6lwifi-2412.74-sdcc2-registers.fd"
+install -m 0644 "$boot_image" "$output_dir/gts6lwifi-2412.74-sdcc2-registers.img"
 (
     cd "$output_dir"
-    sha256sum build.log gts6lwifi-2412.74-sd-blockio.fd gts6lwifi-2412.74-sd-blockio.img > SHA256SUMS.txt
+    sha256sum build.log gts6lwifi-2412.74-sdcc2-registers.fd gts6lwifi-2412.74-sdcc2-registers.img > SHA256SUMS.txt
     sha256sum -c SHA256SUMS.txt
 )
 
@@ -86,7 +86,8 @@ source_url=$source_url
 source_commit=$source_commit
 mu_plus_commit=$mu_plus_commit
 preparation_sha256=$(sha256sum "$preparation" | cut -d' ' -f1)
-purpose=enumerate SimpleFS and candidate BlockIO media; boot only a root startup.nsh volume; never fall back to internal UFS
+purpose=read GPIO96/GCC/SDHCI2 registers, enumerate storage, and boot only a root startup.nsh volume; never fall back to internal UFS
+mmio_scope=read-only: 0x03960000/4, 0x00114004/8/c/10, 0x08804024/28/2c/30/40/44/fe
 scope=RECOVERY-only diagnostic; non-deployable
 EOF
-echo "built SD-BlockIO 2412.74 diagnostic; non-deployable"
+echo "built SDCC2 register 2412.74 diagnostic; non-deployable"
