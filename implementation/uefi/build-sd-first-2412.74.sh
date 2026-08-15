@@ -3,7 +3,7 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "$0")" && pwd)"
 workspace="$(cd "$script_dir/../.." && pwd)"
-output_dir="$workspace/implementation/build/uefi-sdcc2-registers-2412.74"
+output_dir="$workspace/implementation/build/uefi-sm8150-mtp-sdcc-ab-2412.74"
 preparation="$script_dir/prepare-sd-first-2412.74.py"
 
 source_url="https://github.com/Project-Aloha/mu_aloha_platforms.git"
@@ -73,11 +73,11 @@ if [[ -z "$firmware" || ! -s "$firmware" || ! -s "$boot_image" ]]; then
     exit 1
 fi
 
-install -m 0644 "$firmware" "$output_dir/gts6lwifi-2412.74-sdcc2-registers.fd"
-install -m 0644 "$boot_image" "$output_dir/gts6lwifi-2412.74-sdcc2-registers.img"
+install -m 0644 "$firmware" "$output_dir/gts6lwifi-2412.74-sm8150-mtp-sdcc-ab.fd"
+install -m 0644 "$boot_image" "$output_dir/gts6lwifi-2412.74-sm8150-mtp-sdcc-ab.img"
 (
     cd "$output_dir"
-    sha256sum build.log gts6lwifi-2412.74-sdcc2-registers.fd gts6lwifi-2412.74-sdcc2-registers.img > SHA256SUMS.txt
+    sha256sum build.log gts6lwifi-2412.74-sm8150-mtp-sdcc-ab.fd gts6lwifi-2412.74-sm8150-mtp-sdcc-ab.img > SHA256SUMS.txt
     sha256sum -c SHA256SUMS.txt
 )
 
@@ -86,8 +86,10 @@ source_url=$source_url
 source_commit=$source_commit
 mu_plus_commit=$mu_plus_commit
 preparation_sha256=$(sha256sum "$preparation" | cut -d' ' -f1)
-purpose=read GPIO96/GCC/SDHCI2 registers, enumerate storage, and boot only a root startup.nsh volume; never fall back to internal UFS
+purpose=replace only T860 SdccDxe with fixed SM8150 MTP binary, read GPIO96/GCC/SDHCI2 registers, enumerate storage, and boot only a root startup.nsh volume; never fall back to internal UFS
+original_sdcc_sha256=7a8104ad2d939fc61247421211f4e408b61301b3c726239119de56e86e137f8e
+replacement_sdcc_sha256=3a47429a719b4aae1eee72fee1c352c54b50237e7de14e834efb8981dbd16e64
 mmio_scope=read-only: 0x03960000/4, 0x00114004/8/c/10, 0x08804024/28/2c/30/40/44/fe
 scope=RECOVERY-only diagnostic; non-deployable
 EOF
-echo "built SDCC2 register 2412.74 diagnostic; non-deployable"
+echo "built SM8150 MTP SdccDxe A/B 2412.74 diagnostic; non-deployable"

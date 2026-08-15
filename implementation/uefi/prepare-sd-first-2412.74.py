@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Patch Project Aloha 2412.74 for read-only SM-T860 SDCC2 diagnostics."""
+"""Patch Project Aloha 2412.74 for an SM8150 MTP SdccDxe A/B diagnostic."""
 
 from __future__ import annotations
 
@@ -29,11 +29,34 @@ def main() -> int:
     root = args.source_root.resolve()
     source = root / "Common/MU/PcBdsPkg/MsBootPolicy/MsBootPolicy.c"
     inf = root / "Common/MU/PcBdsPkg/MsBootPolicy/MsBootPolicy.inf"
-    for path in (source, inf):
+    t860_sdcc = (
+        root
+        / "Platforms/SurfaceDuo1Pkg/Device/samsung-gts6lwifi/Binaries/QcomPkg/Drivers/SdccDxe/SdccDxe.efi"
+    )
+    mtp_sdcc = (
+        root
+        / "Platforms/SurfaceDuo1Pkg/Device/qcom-mtp8150/Binaries/QcomPkg/Drivers/SdccDxe/SdccDxe.efi"
+    )
+    t860_depex = t860_sdcc.with_suffix(".depex")
+    mtp_depex = mtp_sdcc.with_suffix(".depex")
+    for path in (source, inf, t860_sdcc, mtp_sdcc, t860_depex, mtp_depex):
         if not path.is_file() or path.is_symlink():
             raise SystemExit(f"error: missing regular source file: {path}")
 
-    before = {str(path.relative_to(root)): sha256(path) for path in (source, inf)}
+    expected_t860_sdcc = "7a8104ad2d939fc61247421211f4e408b61301b3c726239119de56e86e137f8e"
+    expected_mtp_sdcc = "3a47429a719b4aae1eee72fee1c352c54b50237e7de14e834efb8981dbd16e64"
+    expected_shared_depex = "96d3dcd80ec35498b71c6d2f1d0e08aab0caa5c6d8b8903d3f1d469636544f1f"
+    if sha256(t860_sdcc) != expected_t860_sdcc:
+        raise SystemExit("error: fixed T860 SdccDxe hash mismatch")
+    if sha256(mtp_sdcc) != expected_mtp_sdcc:
+        raise SystemExit("error: fixed SM8150 MTP SdccDxe hash mismatch")
+    if sha256(t860_depex) != expected_shared_depex or sha256(mtp_depex) != expected_shared_depex:
+        raise SystemExit("error: T860 and SM8150 MTP SdccDxe dependency expressions differ")
+
+    before = {
+        str(path.relative_to(root)): sha256(path)
+        for path in (source, inf, t860_sdcc, mtp_sdcc, t860_depex, mtp_depex)
+    }
     data = source.read_bytes()
     eol = b"\r\n" if b"\r\n" in data else b"\n"
 
@@ -399,7 +422,7 @@ def main() -> int:
             b'          DEBUG ((DEBUG_ERROR, "%a Unable to set console mode - %r\\n", __FUNCTION__, GraphicStatus));',
             b"        }",
             b"",
-            b"        Print (L\"\\r\\nT860 MICROSD MARKER BOOT DIAGNOSTIC\\r\\n\");",
+            b"        Print (L\"\\r\\nT860 SM8150 MTP SDCC DRIVER A/B DIAGNOSTIC\\r\\n\");",
             b"        Print (L\"Looking for \\\\startup.nsh; internal UFS fallback is disabled.\\r\\n\");",
             b"        DiagnoseSdcc2Hardware ();",
             b"        DiagnoseStorageHandles ();",
@@ -438,12 +461,26 @@ def main() -> int:
         "BlockIo protocol dependency",
     )
     inf.write_bytes(inf_data)
+    t860_sdcc.write_bytes(mtp_sdcc.read_bytes())
 
-    after = {str(path.relative_to(root)): sha256(path) for path in (source, inf)}
+    after = {
+        str(path.relative_to(root)): sha256(path)
+        for path in (source, inf, t860_sdcc, mtp_sdcc, t860_depex, mtp_depex)
+    }
+    if sha256(t860_sdcc) != expected_mtp_sdcc:
+        raise SystemExit("error: staged T860 SdccDxe does not match fixed SM8150 MTP binary")
     report = {
         "schema": 1,
-        "profile": "project-aloha-2412.74-sdcc2-register-diagnostic",
-        "purpose": "read SM-T860 SDCC2/GPIO96/GCC registers, enumerate storage, then boot only a root startup.nsh volume",
+        "profile": "project-aloha-2412.74-sm8150-mtp-sdcc-ab-diagnostic",
+        "purpose": "replace only the T860 SdccDxe with the fixed SM8150 MTP binary, read diagnostic registers, enumerate storage, then boot only a root startup.nsh volume",
+        "sdcc_driver_replacement": {
+            "original_path": str(t860_sdcc.relative_to(root)),
+            "original_sha256": expected_t860_sdcc,
+            "replacement_path": str(mtp_sdcc.relative_to(root)),
+            "replacement_sha256": expected_mtp_sdcc,
+            "staged_sha256": sha256(t860_sdcc),
+            "shared_depex_sha256": expected_shared_depex,
+        },
         "mmio_reads": {
             "gcc_sdcc2": ["0x00114004", "0x00114008", "0x0011400c", "0x00114010"],
             "sdhci2": [
@@ -457,7 +494,7 @@ def main() -> int:
             ],
             "tlmm_gpio96": ["0x03960000", "0x03960004"],
         },
-        "mmio_writes": [],
+        "diagnostic_patch_mmio_writes": [],
         "files_before": before,
         "files_after": after,
         "device_writes_performed": False,
