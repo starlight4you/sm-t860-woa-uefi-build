@@ -60,8 +60,6 @@ command -v "${CLANGPDB_AARCH64_PREFIX}gcc" >/dev/null 2>&1 || {
 (
     cd "$build_root"
     source "$build_venv/bin/activate"
-    chmod +x ./timebuild.sh
-    ./timebuild.sh
     python -m pip install --upgrade -r pip-requirements.txt 'uefi_firmware==1.16'
     python ./build_uefi.py --init
     python ./build_uefi.py -d samsung-gts6lwifi
