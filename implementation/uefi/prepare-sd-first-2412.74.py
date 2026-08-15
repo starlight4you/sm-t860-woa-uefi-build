@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Patch Project Aloha 2412.74 for an SM8150 MTP SdccDxe A/B diagnostic."""
+"""Patch Project Aloha 2412.74 to signal Qualcomm's external-SD event."""
 
 from __future__ import annotations
 
@@ -192,6 +192,9 @@ def main() -> int:
             b"STATIC EFI_GUID  mSdccSecondDependencyGuid = {",
             b"  0x26BACCB3, 0x6F42, 0x11D4, { 0xBC, 0xE7, 0x00, 0x80, 0xC7, 0x3C, 0x88, 0x81 }",
             b"};",
+            b"STATIC EFI_GUID  mSdDetectEventGroupGuid = {",
+            b"  0xB7972C36, 0x8A4C, 0x4A56, { 0x8B, 0x02, 0x11, 0x59, 0xB5, 0x2D, 0x4B, 0xFB }",
+            b"};",
             b"",
             b"STATIC",
             b"BOOLEAN",
@@ -279,6 +282,58 @@ def main() -> int:
             b"",
             b"  Print (L\"Sdcc dispatch: loaded=%u images=%u\\r\\n\", SdccCount, HandleCount);",
             b"  Print (L\"Sdcc depex: clock=%r second=%r\\r\\n\", ClockStatus, SecondStatus);",
+            b"}",
+            b"",
+            b"STATIC",
+            b"EFI_STATUS",
+            b"SignalSdCardDetectionAndConnect (",
+            b"  VOID",
+            b"  )",
+            b"{",
+            b"  EFI_STATUS  Status;",
+            b"  EFI_STATUS  ConnectStatus;",
+            b"  EFI_HANDLE  *Handles;",
+            b"  UINTN       HandleCount;",
+            b"  UINTN       Index;",
+            b"  UINTN       ConnectFailures;",
+            b"",
+            b"  // Qualcomm PlatformBdsLib signals this event before ConnectAllDrivers.",
+            b"  // Without it, event-based SdccDxe never publishes the removable BlockIO.",
+            b"  Status = EfiEventGroupSignal (&mSdDetectEventGroupGuid);",
+            b"  Print (L\"SD detect event: %r\\r\\n\", Status);",
+            b"  if (EFI_ERROR (Status)) {",
+            b"    return Status;",
+            b"  }",
+            b"",
+            b"  Handles         = NULL;",
+            b"  HandleCount     = 0;",
+            b"  ConnectFailures = 0;",
+            b"  Status = gBS->LocateHandleBuffer (",
+            b"                  AllHandles,",
+            b"                  NULL,",
+            b"                  NULL,",
+            b"                  &HandleCount,",
+            b"                  &Handles",
+            b"                  );",
+            b"  if (EFI_ERROR (Status)) {",
+            b"    Print (L\"Post-event handle enumeration: %r\\r\\n\", Status);",
+            b"    return Status;",
+            b"  }",
+            b"",
+            b"  for (Index = 0; Index < HandleCount; Index++) {",
+            b"    ConnectStatus = gBS->ConnectController (Handles[Index], NULL, NULL, TRUE);",
+            b"    if (EFI_ERROR (ConnectStatus) && (ConnectStatus != EFI_NOT_FOUND)) {",
+            b"      ConnectFailures++;",
+            b"    }",
+            b"  }",
+            b"",
+            b"  FreePool (Handles);",
+            b"  Print (",
+            b"    L\"Post-event connect-all: handles=%u failures=%u\\r\\n\",",
+            b"    HandleCount,",
+            b"    ConnectFailures",
+            b"    );",
+            b"  return EFI_SUCCESS;",
             b"}",
             b"",
             b"STATIC",
@@ -522,9 +577,10 @@ def main() -> int:
             b'          DEBUG ((DEBUG_ERROR, "%a Unable to set console mode - %r\\n", __FUNCTION__, GraphicStatus));',
             b"        }",
             b"",
-            b"        Print (L\"\\r\\nT860 SDCC DISPATCH/DEPEX DIAGNOSTIC\\r\\n\");",
+            b"        Print (L\"\\r\\nT860 SDCC EVENT-SIGNAL DIAGNOSTIC\\r\\n\");",
             b"        Print (L\"Looking for \\\\startup.nsh; internal UFS fallback is disabled.\\r\\n\");",
             b"        DiagnoseSdccDispatch ();",
+            b"        Status = SignalSdCardDetectionAndConnect ();",
             b"        DiagnoseSdcc2Hardware ();",
             b"        DiagnoseStorageHandles ();",
             b"        Status = SelectAndBootDevice (&gEfiSimpleFileSystemProtocolGuid, FilterOnlySD);",
@@ -564,31 +620,38 @@ def main() -> int:
         "BlockIo protocol dependency",
     )
     inf.write_bytes(inf_data)
-    t860_sdcc.write_bytes(mtp_sdcc.read_bytes())
 
     after = {
         str(path.relative_to(root)): sha256(path)
         for path in (source, inf, t860_sdcc, mtp_sdcc, t860_depex, mtp_depex)
     }
-    if sha256(t860_sdcc) != expected_mtp_sdcc:
-        raise SystemExit("error: staged T860 SdccDxe does not match fixed SM8150 MTP binary")
+    if sha256(t860_sdcc) != expected_t860_sdcc:
+        raise SystemExit("error: native T860 SdccDxe changed during event-only diagnostic")
     report = {
         "schema": 1,
-        "profile": "project-aloha-2412.74-sdcc-dispatch-depex-diagnostic",
-        "purpose": "replace only the T860 SdccDxe with the fixed SM8150 MTP binary, report the exact binary dependency protocols and loaded-image state, read diagnostic registers, enumerate storage, then boot only a root startup.nsh volume",
+        "profile": "project-aloha-2412.74-sdcc-event-signal-diagnostic",
+        "purpose": "use the native T860 SdccDxe, signal Qualcomm's fixed external-SD event group, connect newly published controllers, read diagnostic registers, enumerate storage, then boot only a root startup.nsh volume",
+        "external_sd_event": {
+            "guid": "b7972c36-8a4c-4a56-8b02-1159b52d4bfb",
+            "reference_repository": "https://github.com/SwedMlite/BOOT.XF.3.3",
+            "reference_commit": "55ff7c1920ccf084951b2770d46ffcbe8917864f",
+            "reference_driver_path": "QcomPkg/Drivers/SdccDxe/SdccDxe.c",
+            "reference_bds_path": "QcomPkg/Library/PlatformBdsLib/PlatformBdsLib.c",
+        },
         "sdcc_depex": {
             "expression": "241afae6-885f-4f6c-a7ea-c28eab79c3e5 AND 26baccb3-6f42-11d4-bce7-0080c73c8881",
             "clock_protocol_guid": "241afae6-885f-4f6c-a7ea-c28eab79c3e5",
             "second_protocol_guid": "26baccb3-6f42-11d4-bce7-0080c73c8881",
             "driver_file_guid": "f10f76db-42c1-533f-34a8-69be24653110",
         },
-        "sdcc_driver_replacement": {
-            "original_path": str(t860_sdcc.relative_to(root)),
-            "original_sha256": expected_t860_sdcc,
-            "replacement_path": str(mtp_sdcc.relative_to(root)),
-            "replacement_sha256": expected_mtp_sdcc,
+        "sdcc_driver": {
+            "native_path": str(t860_sdcc.relative_to(root)),
+            "native_sha256": expected_t860_sdcc,
+            "comparison_mtp_path": str(mtp_sdcc.relative_to(root)),
+            "comparison_mtp_sha256": expected_mtp_sdcc,
             "staged_sha256": sha256(t860_sdcc),
             "shared_depex_sha256": expected_shared_depex,
+            "replacement_performed": False,
         },
         "mmio_reads": {
             "gcc_sdcc2": ["0x00114004", "0x00114008", "0x0011400c", "0x00114010"],
@@ -604,6 +667,13 @@ def main() -> int:
             "tlmm_gpio96": ["0x03960000", "0x03960004"],
         },
         "diagnostic_patch_mmio_writes": [],
+        "runtime_side_effects": {
+            "native_driver_controller_state_changes_possible": True,
+            "removable_media_reads_possible": True,
+            "filesystem_writes_requested": False,
+            "partition_writes_requested": False,
+            "description": "signaling the Qualcomm external-SD event invokes native SdccDxe initialization, which may program SDCC/GCC/TLMM/PMIC state and read card metadata before the diagnostic performs read-only enumeration",
+        },
         "files_before": before,
         "files_after": after,
         "device_writes_performed": False,

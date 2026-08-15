@@ -3,7 +3,7 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "$0")" && pwd)"
 workspace="$(cd "$script_dir/../.." && pwd)"
-output_dir="$workspace/implementation/build/uefi-sdcc-dispatch-depex-2412.74"
+output_dir="$workspace/implementation/build/uefi-sdcc-event-signal-2412.74"
 preparation="$script_dir/prepare-sd-first-2412.74.py"
 
 source_url="https://github.com/Project-Aloha/mu_aloha_platforms.git"
@@ -73,11 +73,11 @@ if [[ -z "$firmware" || ! -s "$firmware" || ! -s "$boot_image" ]]; then
     exit 1
 fi
 
-install -m 0644 "$firmware" "$output_dir/gts6lwifi-2412.74-sdcc-dispatch-depex.fd"
-install -m 0644 "$boot_image" "$output_dir/gts6lwifi-2412.74-sdcc-dispatch-depex.img"
+install -m 0644 "$firmware" "$output_dir/gts6lwifi-2412.74-sdcc-event-signal.fd"
+install -m 0644 "$boot_image" "$output_dir/gts6lwifi-2412.74-sdcc-event-signal.img"
 (
     cd "$output_dir"
-    sha256sum build.log gts6lwifi-2412.74-sdcc-dispatch-depex.fd gts6lwifi-2412.74-sdcc-dispatch-depex.img > SHA256SUMS.txt
+    sha256sum build.log gts6lwifi-2412.74-sdcc-event-signal.fd gts6lwifi-2412.74-sdcc-event-signal.img > SHA256SUMS.txt
     sha256sum -c SHA256SUMS.txt
 )
 
@@ -86,10 +86,11 @@ source_url=$source_url
 source_commit=$source_commit
 mu_plus_commit=$mu_plus_commit
 preparation_sha256=$(sha256sum "$preparation" | cut -d' ' -f1)
-purpose=replace only T860 SdccDxe with fixed SM8150 MTP binary, report exact depex protocol and loaded-image state, read GPIO96/GCC/SDHCI2 registers, enumerate storage, and boot only a root startup.nsh volume; never fall back to internal UFS
-original_sdcc_sha256=7a8104ad2d939fc61247421211f4e408b61301b3c726239119de56e86e137f8e
-replacement_sdcc_sha256=3a47429a719b4aae1eee72fee1c352c54b50237e7de14e834efb8981dbd16e64
-mmio_scope=read-only: 0x03960000/4, 0x00114004/8/c/10, 0x08804024/28/2c/30/40/44/fe
+purpose=retain the native T860 SdccDxe, signal Qualcomm external-SD event group b7972c36-8a4c-4a56-8b02-1159b52d4bfb, recursively connect controllers, report loaded/depex/register/storage state, and boot only a root startup.nsh volume; never fall back to internal UFS
+native_sdcc_sha256=7a8104ad2d939fc61247421211f4e408b61301b3c726239119de56e86e137f8e
+comparison_mtp_sdcc_sha256=3a47429a719b4aae1eee72fee1c352c54b50237e7de14e834efb8981dbd16e64
+direct_diagnostic_mmio_scope=read-only: 0x03960000/4, 0x00114004/8/c/10, 0x08804024/28/2c/30/40/44/fe
+runtime_effect=event invokes native SdccDxe, which may change SDCC/GCC/TLMM/PMIC controller state and read removable media; no filesystem or partition writes are requested
 scope=RECOVERY-only diagnostic; non-deployable
 EOF
-echo "built SdccDxe dispatch/depex 2412.74 diagnostic; non-deployable"
+echo "built SdccDxe external-SD event-signal 2412.74 diagnostic; non-deployable"
