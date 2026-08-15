@@ -19,8 +19,8 @@ for command in git mono clang sha256sum; do
 done
 python3 - <<'PY'
 import sys
-if sys.version_info < (3, 12):
-    raise SystemExit("error: Python 3.12 or newer is required")
+if sys.version_info < (3, 10):
+    raise SystemExit("error: Python 3.10 or newer is required")
 PY
 
 if [[ -e "$output_dir" ]]; then
