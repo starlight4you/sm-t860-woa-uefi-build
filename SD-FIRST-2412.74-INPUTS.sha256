@@ -1,3 +1,3 @@
-e86ec4bc83eb5d93decc2a20c2903ae80e147e2f019baf40d59acd1030f16f1b  implementation/uefi/build-sd-first-2412.74.sh
-acd9f73a7e66742bc10a6fd62276264b194b15c7f1a3c6e93374fc62e297cf83  implementation/uefi/prepare-sd-first-2412.74.py
+7d205010b33e4ac356ebbf90a847b41f2f139b29ff63ea3e1731f53d21601a51  implementation/uefi/build-sd-first-2412.74.sh
+51b3df5e65a66435026ca1a290a8bd5f2eb5a698af2d7f568c0b3877f3fba4c3  implementation/uefi/prepare-sd-first-2412.74.py
 d9acb5a495e5e80e31007f6a662722e70f8ef088ef6d8e1f209e271c24ee9d55  implementation/uefi/nuget-mono.sh
