@@ -3,7 +3,7 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "$0")" && pwd)"
 workspace="$(cd "$script_dir/../.." && pwd)"
-output_dir="$workspace/implementation/build/uefi-sdcc-event-signal-2412.74"
+output_dir="$workspace/implementation/build/uefi-sdcc-vreg-event-2412.74"
 preparation="$script_dir/prepare-sd-first-2412.74.py"
 
 source_url="https://github.com/Project-Aloha/mu_aloha_platforms.git"
@@ -73,11 +73,11 @@ if [[ -z "$firmware" || ! -s "$firmware" || ! -s "$boot_image" ]]; then
     exit 1
 fi
 
-install -m 0644 "$firmware" "$output_dir/gts6lwifi-2412.74-sdcc-event-signal.fd"
-install -m 0644 "$boot_image" "$output_dir/gts6lwifi-2412.74-sdcc-event-signal.img"
+install -m 0644 "$firmware" "$output_dir/gts6lwifi-2412.74-sdcc-vreg-event.fd"
+install -m 0644 "$boot_image" "$output_dir/gts6lwifi-2412.74-sdcc-vreg-event.img"
 (
     cd "$output_dir"
-    sha256sum build.log gts6lwifi-2412.74-sdcc-event-signal.fd gts6lwifi-2412.74-sdcc-event-signal.img > SHA256SUMS.txt
+    sha256sum build.log gts6lwifi-2412.74-sdcc-vreg-event.fd gts6lwifi-2412.74-sdcc-vreg-event.img > SHA256SUMS.txt
     sha256sum -c SHA256SUMS.txt
 )
 
@@ -86,11 +86,11 @@ source_url=$source_url
 source_commit=$source_commit
 mu_plus_commit=$mu_plus_commit
 preparation_sha256=$(sha256sum "$preparation" | cut -d' ' -f1)
-purpose=retain the native T860 SdccDxe, signal Qualcomm external-SD event group b7972c36-8a4c-4a56-8b02-1159b52d4bfb, recursively connect controllers, report loaded/depex/register/storage state, and boot only a root startup.nsh volume; never fall back to internal UFS
+purpose=enable PMIC_C/PM8150L LDO9 and LDO6 at 2960mV, retain the native T860 SdccDxe, signal Qualcomm external-SD event group b7972c36-8a4c-4a56-8b02-1159b52d4bfb, report register/storage state, and boot only a root startup.nsh volume; never fall back to internal UFS
 native_sdcc_sha256=7a8104ad2d939fc61247421211f4e408b61301b3c726239119de56e86e137f8e
 comparison_mtp_sdcc_sha256=3a47429a719b4aae1eee72fee1c352c54b50237e7de14e834efb8981dbd16e64
 direct_diagnostic_mmio_scope=read-only: 0x03960000/4, 0x00114004/8/c/10, 0x08804024/28/2c/30/40/44/fe
-runtime_effect=event invokes native SdccDxe, which may change SDCC/GCC/TLMM/PMIC controller state and read removable media; no filesystem or partition writes are requested
+runtime_effect=diagnostic explicitly enables the two T860 SD rails, then the event invokes native SdccDxe, which may change SDCC/GCC/TLMM state and read removable media; no filesystem or partition writes are requested
 scope=RECOVERY-only diagnostic; non-deployable
 EOF
-echo "built SdccDxe external-SD event-signal 2412.74 diagnostic; non-deployable"
+echo "built T860 SD-rail plus SdccDxe event 2412.74 diagnostic; non-deployable"

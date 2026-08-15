@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Patch Project Aloha 2412.74 to signal Qualcomm's external-SD event."""
+"""Patch Project Aloha 2412.74 to power T860 SD rails and signal SD detection."""
 
 from __future__ import annotations
 
@@ -68,6 +68,8 @@ def main() -> int:
         + b"#include <Protocol/BlockIo.h>"
         + eol
         + b"#include <Protocol/LoadedImage.h>"
+        + eol
+        + b"#include <Protocol/EFIPmicVreg.h>"
         + eol
         + b"#include <Library/IoLib.h>"
         + eol
@@ -282,6 +284,90 @@ def main() -> int:
             b"",
             b"  Print (L\"Sdcc dispatch: loaded=%u images=%u\\r\\n\", SdccCount, HandleCount);",
             b"  Print (L\"Sdcc depex: clock=%r second=%r\\r\\n\", ClockStatus, SecondStatus);",
+            b"}",
+            b"",
+            b"STATIC",
+            b"VOID",
+            b"PrintSdRailStatus (",
+            b"  EFI_QCOM_PMIC_VREG_PROTOCOL  *Vreg,",
+            b"  EFI_PM_VREG_ID_TYPE          VregId,",
+            b"  CONST CHAR16                  *Name",
+            b"  )",
+            b"{",
+            b"  EFI_PM_VREG_STATUS_TYPE  RailStatus;",
+            b"  EFI_STATUS               LevelStatus;",
+            b"  EFI_STATUS               Status;",
+            b"  UINT32                   LevelUv;",
+            b"",
+            b"  ZeroMem (&RailStatus, sizeof (RailStatus));",
+            b"  LevelUv    = 0;",
+            b"  Status      = Vreg->VregGetStatus (2, VregId, &RailStatus);",
+            b"  LevelStatus = Vreg->VregGetLevel (2, VregId, &LevelUv);",
+            b"  Print (",
+            b"    L\" PMIC_C %s: status=%r level=%r/%u uV enabled=%d ok=%d\\r\\n\",",
+            b"    Name,",
+            b"    Status,",
+            b"    LevelStatus,",
+            b"    LevelUv,",
+            b"    RailStatus.SwEnable,",
+            b"    RailStatus.VregOk",
+            b"    );",
+            b"}",
+            b"",
+            b"STATIC",
+            b"EFI_STATUS",
+            b"EnableT860SdRails (",
+            b"  VOID",
+            b"  )",
+            b"{",
+            b"  EFI_QCOM_PMIC_VREG_PROTOCOL  *Vreg;",
+            b"  EFI_STATUS                   Status;",
+            b"",
+            b"  Vreg   = NULL;",
+            b"  Status = gBS->LocateProtocol (",
+            b"                  &gQcomPmicVregProtocolGuid,",
+            b"                  NULL,",
+            b"                  (VOID **)&Vreg",
+            b"                  );",
+            b"  Print (L\"PMIC VREG protocol: %r\\r\\n\", Status);",
+            b"  if (EFI_ERROR (Status) || (Vreg == NULL)) {",
+            b"    return Status;",
+            b"  }",
+            b"",
+            b"  Print (L\"SD rails before enable:\\r\\n\");",
+            b"  PrintSdRailStatus (Vreg, EFI_PM_LDO_9, L\"L9/VDD\");",
+            b"  PrintSdRailStatus (Vreg, EFI_PM_LDO_6, L\"L6/VDD_IO\");",
+            b"",
+            b"  Status = Vreg->VregSetLevel (2, EFI_PM_LDO_9, 2960);",
+            b"  Print (L\"Set PMIC_C L9 to 2960mV: %r\\r\\n\", Status);",
+            b"  if (EFI_ERROR (Status)) {",
+            b"    return Status;",
+            b"  }",
+            b"",
+            b"  Status = Vreg->VregSetLevel (2, EFI_PM_LDO_6, 2960);",
+            b"  Print (L\"Set PMIC_C L6 to 2960mV: %r\\r\\n\", Status);",
+            b"  if (EFI_ERROR (Status)) {",
+            b"    return Status;",
+            b"  }",
+            b"",
+            b"  Status = Vreg->VregControl (2, EFI_PM_LDO_9, TRUE);",
+            b"  Print (L\"Enable PMIC_C L9/VDD: %r\\r\\n\", Status);",
+            b"  if (EFI_ERROR (Status)) {",
+            b"    return Status;",
+            b"  }",
+            b"",
+            b"  gBS->Stall (1000);",
+            b"  Status = Vreg->VregControl (2, EFI_PM_LDO_6, TRUE);",
+            b"  Print (L\"Enable PMIC_C L6/VDD_IO: %r\\r\\n\", Status);",
+            b"  if (EFI_ERROR (Status)) {",
+            b"    return Status;",
+            b"  }",
+            b"",
+            b"  gBS->Stall (5000);",
+            b"  Print (L\"SD rails after enable:\\r\\n\");",
+            b"  PrintSdRailStatus (Vreg, EFI_PM_LDO_9, L\"L9/VDD\");",
+            b"  PrintSdRailStatus (Vreg, EFI_PM_LDO_6, L\"L6/VDD_IO\");",
+            b"  return EFI_SUCCESS;",
             b"}",
             b"",
             b"STATIC",
@@ -577,10 +663,15 @@ def main() -> int:
             b'          DEBUG ((DEBUG_ERROR, "%a Unable to set console mode - %r\\n", __FUNCTION__, GraphicStatus));',
             b"        }",
             b"",
-            b"        Print (L\"\\r\\nT860 SDCC EVENT-SIGNAL DIAGNOSTIC\\r\\n\");",
+            b"        Print (L\"\\r\\nT860 SDCC VREG + EVENT DIAGNOSTIC\\r\\n\");",
             b"        Print (L\"Looking for \\\\startup.nsh; internal UFS fallback is disabled.\\r\\n\");",
             b"        DiagnoseSdccDispatch ();",
-            b"        Status = SignalSdCardDetectionAndConnect ();",
+            b"        Status = EnableT860SdRails ();",
+            b"        if (!EFI_ERROR (Status)) {",
+            b"          Status = SignalSdCardDetectionAndConnect ();",
+            b"        } else {",
+            b"          Print (L\"SD event skipped because rail setup failed: %r\\r\\n\", Status);",
+            b"        }",
             b"        DiagnoseSdcc2Hardware ();",
             b"        DiagnoseStorageHandles ();",
             b"        Status = SelectAndBootDevice (&gEfiSimpleFileSystemProtocolGuid, FilterOnlySD);",
@@ -597,6 +688,15 @@ def main() -> int:
 
     inf_data = inf.read_bytes()
     inf_eol = b"\r\n" if b"\r\n" in inf_data else b"\n"
+    inf_data = replace_once(
+        inf_data,
+        b"  PcBdsPkg/PcBdsPkg.dec" + inf_eol,
+        b"  PcBdsPkg/PcBdsPkg.dec"
+        + inf_eol
+        + b"  QcomPkg/QcomPkg.dec"
+        + inf_eol,
+        "QcomPkg dependency",
+    )
     inf_data = replace_once(
         inf_data,
         b"[LibraryClasses]" + inf_eol + b"  DevicePathLib",
@@ -616,6 +716,8 @@ def main() -> int:
         + inf_eol
         + b"  gEfiLoadedImageProtocolGuid"
         + inf_eol
+        + b"  gQcomPmicVregProtocolGuid"
+        + inf_eol
         + b"  gEfiSimpleFileSystemProtocolGuid",
         "BlockIo protocol dependency",
     )
@@ -629,8 +731,15 @@ def main() -> int:
         raise SystemExit("error: native T860 SdccDxe changed during event-only diagnostic")
     report = {
         "schema": 1,
-        "profile": "project-aloha-2412.74-sdcc-event-signal-diagnostic",
-        "purpose": "use the native T860 SdccDxe, signal Qualcomm's fixed external-SD event group, connect newly published controllers, read diagnostic registers, enumerate storage, then boot only a root startup.nsh volume",
+        "profile": "project-aloha-2412.74-sdcc-vreg-event-diagnostic",
+        "purpose": "enable the T860 SD card rails PM8150L L9 and L6 at 2.96V, use the native T860 SdccDxe, signal Qualcomm's fixed external-SD event group, enumerate storage, then boot only a root startup.nsh volume",
+        "sd_power": {
+            "pmic_index": 2,
+            "pmic_name": "PMIC_C / PM8150L",
+            "vdd": {"resource": "LDO9", "millivolts": 2960},
+            "vdd_io_initial": {"resource": "LDO6", "millivolts": 2960},
+            "source": "SM-T860 Android DTS uses pm8150l_l9 for vdd and pm8150l_l6 for vdd-io; SD initialization begins at 3V signaling",
+        },
         "external_sd_event": {
             "guid": "b7972c36-8a4c-4a56-8b02-1159b52d4bfb",
             "reference_repository": "https://github.com/SwedMlite/BOOT.XF.3.3",
@@ -672,7 +781,7 @@ def main() -> int:
             "removable_media_reads_possible": True,
             "filesystem_writes_requested": False,
             "partition_writes_requested": False,
-            "description": "signaling the Qualcomm external-SD event invokes native SdccDxe initialization, which may program SDCC/GCC/TLMM/PMIC state and read card metadata before the diagnostic performs read-only enumeration",
+            "description": "the diagnostic explicitly enables PMIC_C LDO9/LDO6 at 2.96V, then signals Qualcomm external-SD detection; native SdccDxe may program SDCC/GCC/TLMM state and read card metadata before read-only enumeration",
         },
         "files_before": before,
         "files_after": after,
