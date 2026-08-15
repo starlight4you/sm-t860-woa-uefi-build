@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Patch an exact Project Aloha 2412.74 build tree to try microSD first."""
+"""Patch Project Aloha 2412.74 to boot a marker-identified microSD only."""
 
 from __future__ import annotations
 
@@ -39,26 +39,6 @@ def main() -> int:
 
     data = replace_once(
         data,
-        b'#include "MsBootPolicy.h"' + eol + eol + b"#define USB_DRIVE_SECOND_CHANCE_DELAY_S",
-        b'#include "MsBootPolicy.h"'
-        + eol
-        + eol
-        + b"EFI_DEVICE_PATH_PROTOCOL *"
-        + eol
-        + b"EFIAPI"
-        + eol
-        + b"GetSdCardDevicePath ("
-        + eol
-        + b"  VOID"
-        + eol
-        + b"  );"
-        + eol
-        + eol
-        + b"#define USB_DRIVE_SECOND_CHANCE_DELAY_S",
-        "SD-card device-path declaration",
-    )
-    data = replace_once(
-        data,
         b"static BOOT_SEQUENCE  mSddBootSequence[] = {"
         + eol
         + b"  MsBootHDD,"
@@ -69,8 +49,6 @@ def main() -> int:
         b"static BOOT_SEQUENCE  mSddBootSequence[] = {"
         + eol
         + b"  MsBootSD,"
-        + eol
-        + b"  MsBootHDD,"
         + eol
         + b"  MsBootDone"
         + eol
@@ -93,37 +71,70 @@ def main() -> int:
             b"  return CheckDeviceNode (DevicePath, MESSAGING_DEVICE_PATH, MSG_IPv6_DP);",
             b"}",
             b"",
-            b"BOOLEAN EFIAPI",
-            b"IsDevicePathSD (",
-            b"  EFI_DEVICE_PATH_PROTOCOL  *DevicePath",
+            b"STATIC",
+            b"BOOLEAN",
+            b"FileSystemHasSdMarker (",
+            b"  EFI_HANDLE  Handle",
             b"  )",
             b"{",
-            b"  EFI_DEVICE_PATH_PROTOCOL  *SdCardDevicePath;",
-            b"  UINTN                     DevicePathSize;",
-            b"  UINTN                     SdCardDevicePathSize;",
+            b"  EFI_SIMPLE_FILE_SYSTEM_PROTOCOL  *FileSystem;",
+            b"  EFI_FILE_PROTOCOL                *Root;",
+            b"  EFI_FILE_PROTOCOL                *Marker;",
+            b"  EFI_STATUS                       Status;",
             b"",
-            b"  if ((DevicePath == NULL) || !IsDevicePathValid (DevicePath, 0)) {",
+            b"  Root   = NULL;",
+            b"  Marker = NULL;",
+            b"  Status = gBS->HandleProtocol (",
+            b"                  Handle,",
+            b"                  &gEfiSimpleFileSystemProtocolGuid,",
+            b"                  (VOID **)&FileSystem",
+            b"                  );",
+            b"  if (EFI_ERROR (Status)) {",
             b"    return FALSE;",
             b"  }",
             b"",
-            b"  SdCardDevicePath = GetSdCardDevicePath ();",
-            b"  if ((SdCardDevicePath == NULL) || !IsDevicePathValid (SdCardDevicePath, 0)) {",
+            b"  Status = FileSystem->OpenVolume (FileSystem, &Root);",
+            b"  if (EFI_ERROR (Status) || (Root == NULL)) {",
             b"    return FALSE;",
             b"  }",
             b"",
-            b"  DevicePathSize       = GetDevicePathSize (DevicePath);",
-            b"  SdCardDevicePathSize = GetDevicePathSize (SdCardDevicePath);",
-            b"  if ((SdCardDevicePathSize <= END_DEVICE_PATH_LENGTH) ||",
-            b"      (DevicePathSize <= SdCardDevicePathSize))",
-            b"  {",
-            b"    return FALSE;",
+            b"  Status = Root->Open (",
+            b"                   Root,",
+            b"                   &Marker,",
+            b"                   L\"\\\\startup.nsh\",",
+            b"                   EFI_FILE_MODE_READ,",
+            b"                   0",
+            b"                   );",
+            b"  if (Marker != NULL) {",
+            b"    Marker->Close (Marker);",
             b"  }",
             b"",
-            b"  return (CompareMem (",
-            b"            DevicePath,",
-            b"            SdCardDevicePath,",
-            b"            SdCardDevicePathSize - END_DEVICE_PATH_LENGTH",
-            b"            ) == 0);",
+            b"  Root->Close (Root);",
+            b"  return !EFI_ERROR (Status);",
+            b"}",
+            b"",
+            b"STATIC",
+            b"VOID",
+            b"FilterMarkedFileSystems (",
+            b"  EFI_HANDLE  *HandleBuffer,",
+            b"  UINTN       *HandleCount",
+            b"  )",
+            b"{",
+            b"  UINTN  Index;",
+            b"",
+            b"  for (Index = 0; Index < *HandleCount;) {",
+            b"    if (!FileSystemHasSdMarker (HandleBuffer[Index])) {",
+            b"      (*HandleCount)--;",
+            b"      CopyMem (",
+            b"        &HandleBuffer[Index],",
+            b"        &HandleBuffer[Index + 1],",
+            b"        (*HandleCount - Index) * sizeof (EFI_HANDLE)",
+            b"        );",
+            b"      continue;",
+            b"    }",
+            b"",
+            b"    Index++;",
+            b"  }",
             b"}",
             b"",
             b"BOOLEAN EFIAPI",
@@ -131,7 +142,7 @@ def main() -> int:
             b"  EFI_DEVICE_PATH_PROTOCOL  *DevicePath",
             b"  )",
             b"{",
-            b"  return IsDevicePathSD (DevicePath);",
+            b"  return (DevicePath != NULL);",
             b"}",
             b"",
             b"BOOLEAN EFIAPI",
@@ -139,6 +150,23 @@ def main() -> int:
         )
     )
     data = replace_once(data, ipv6_tail, sd_filter, "SD device-path filter")
+
+    data = replace_once(
+        data,
+        b"  FilterHandles (Handles, &HandleCount, ByFilter);" + eol,
+        eol.join(
+            (
+                b"  if (ByFilter == FilterOnlySD) {",
+                b"    Print (L\"\\r\\nT860 SD probe: %u SimpleFS handle(s)\\r\\n\", HandleCount);",
+                b"    FilterMarkedFileSystems (Handles, &HandleCount);",
+                b"    Print (L\"T860 SD probe: %u startup.nsh marker(s)\\r\\n\", HandleCount);",
+                b"  } else {",
+                b"    FilterHandles (Handles, &HandleCount, ByFilter);",
+                b"  }",
+            )
+        ) + eol,
+        "marker-aware filesystem filtering",
+    )
 
     hdd_case = b"      case MsBootHDD:" + eol
     sd_case = eol.join(
@@ -149,33 +177,25 @@ def main() -> int:
             b'          DEBUG ((DEBUG_ERROR, "%a Unable to set console mode - %r\\n", __FUNCTION__, GraphicStatus));',
             b"        }",
             b"",
+            b"        Print (L\"\\r\\nT860 MICROSD MARKER BOOT DIAGNOSTIC\\r\\n\");",
+            b"        Print (L\"Looking for \\\\startup.nsh; internal UFS fallback is disabled.\\r\\n\");",
             b"        Status = SelectAndBootDevice (&gEfiSimpleFileSystemProtocolGuid, FilterOnlySD);",
-            b"        break;",
+            b"        Print (L\"\\r\\nSD boot did not transfer control: %r\\r\\n\", Status);",
+            b"        Print (L\"Diagnostic stopped. Hold Power + Volume Down to reboot.\\r\\n\");",
+            b"        while (TRUE) {",
+            b"          gBS->Stall (1000 * 1000);",
+            b"        }",
             b"      case MsBootHDD:",
         )
     ) + eol
     data = replace_once(data, hdd_case, sd_case, "SD boot case")
     source.write_bytes(data)
 
-    inf_data = inf.read_bytes()
-    inf_eol = b"\r\n" if b"\r\n" in inf_data else b"\n"
-    inf_data = replace_once(
-        inf_data,
-        b"  MsBootPolicyLib" + inf_eol + b"  UefiBootManagerLib",
-        b"  MsBootPolicyLib"
-        + inf_eol
-        + b"  MsPlatformDevicesLib"
-        + inf_eol
-        + b"  UefiBootManagerLib",
-        "MsPlatformDevicesLib dependency",
-    )
-    inf.write_bytes(inf_data)
-
     after = {str(path.relative_to(root)): sha256(path) for path in (source, inf)}
     report = {
         "schema": 1,
-        "profile": "project-aloha-2412.74-sd-first",
-        "purpose": "try the exact microSD device path before internal non-USB storage",
+        "profile": "project-aloha-2412.74-sd-marker-diagnostic",
+        "purpose": "boot only a SimpleFS volume containing root startup.nsh and visibly stop on failure",
         "files_before": before,
         "files_after": after,
         "device_writes_performed": False,

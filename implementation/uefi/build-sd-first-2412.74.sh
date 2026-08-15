@@ -3,7 +3,7 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "$0")" && pwd)"
 workspace="$(cd "$script_dir/../.." && pwd)"
-output_dir="$workspace/implementation/build/uefi-sd-first-2412.74"
+output_dir="$workspace/implementation/build/uefi-sd-marker-2412.74"
 preparation="$script_dir/prepare-sd-first-2412.74.py"
 
 source_url="https://github.com/Project-Aloha/mu_aloha_platforms.git"
@@ -73,11 +73,11 @@ if [[ -z "$firmware" || ! -s "$firmware" || ! -s "$boot_image" ]]; then
     exit 1
 fi
 
-install -m 0644 "$firmware" "$output_dir/gts6lwifi-2412.74-sd-first.fd"
-install -m 0644 "$boot_image" "$output_dir/gts6lwifi-2412.74-sd-first.img"
+install -m 0644 "$firmware" "$output_dir/gts6lwifi-2412.74-sd-marker.fd"
+install -m 0644 "$boot_image" "$output_dir/gts6lwifi-2412.74-sd-marker.img"
 (
     cd "$output_dir"
-    sha256sum build.log gts6lwifi-2412.74-sd-first.fd gts6lwifi-2412.74-sd-first.img > SHA256SUMS.txt
+    sha256sum build.log gts6lwifi-2412.74-sd-marker.fd gts6lwifi-2412.74-sd-marker.img > SHA256SUMS.txt
     sha256sum -c SHA256SUMS.txt
 )
 
@@ -86,7 +86,7 @@ source_url=$source_url
 source_commit=$source_commit
 mu_plus_commit=$mu_plus_commit
 preparation_sha256=$(sha256sum "$preparation" | cut -d' ' -f1)
-purpose=boot the external SD-card device path before falling back to internal non-USB storage
+purpose=boot only a SimpleFS volume containing root startup.nsh; visibly stop instead of falling back to internal UFS
 scope=RECOVERY-only diagnostic; non-deployable
 EOF
-echo "built SD-first 2412.74 diagnostic; non-deployable"
+echo "built SD-marker 2412.74 diagnostic; non-deployable"
