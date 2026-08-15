@@ -1,4 +1,4 @@
-name: Build SM-T860 SD-BlockIO diagnostic
+name: Build SM-T860 SDCC2 register diagnostic
 
 on:
   workflow_dispatch:
@@ -45,18 +45,18 @@ jobs:
           mono --version
           command -v nuget
 
-      - name: Verify reviewed SD-BlockIO inputs
+      - name: Verify reviewed SDCC2 register diagnostic inputs
         shell: bash
         run: sha256sum -c SD-FIRST-2412.74-INPUTS.sha256
 
-      - name: Build exact 2412.74 source with SD-BlockIO diagnostics
+      - name: Build exact 2412.74 source with read-only SDCC2 diagnostics
         run: ./implementation/uefi/build-sd-first-2412.74.sh
 
       - name: Freeze artifact checksums
         shell: bash
         run: |
           set -euo pipefail
-          output=implementation/build/uefi-sd-blockio-2412.74
+          output=implementation/build/uefi-sdcc2-registers-2412.74
           (
             cd "$output"
             find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -printf '%f\n' \
@@ -69,7 +69,7 @@ jobs:
       - name: Upload non-deployable diagnostic evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: sm-t860-2412.74-sd-blockio-${{ github.sha }}
-          path: implementation/build/uefi-sd-blockio-2412.74/
+          name: sm-t860-2412.74-sdcc2-registers-${{ github.sha }}
+          path: implementation/build/uefi-sdcc2-registers-2412.74/
           if-no-files-found: error
           retention-days: 3
