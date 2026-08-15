@@ -197,6 +197,9 @@ def main() -> int:
             b"STATIC EFI_GUID  mSdDetectEventGroupGuid = {",
             b"  0xB7972C36, 0x8A4C, 0x4A56, { 0x8B, 0x02, 0x11, 0x59, 0xB5, 0x2D, 0x4B, 0xFB }",
             b"};",
+            b"STATIC EFI_GUID  mPmicVregProtocolGuid = {",
+            b"  0x22D38D3D, 0xE8B6, 0x4F8F, { 0x9C, 0x26, 0xBC, 0xEB, 0x07, 0xD6, 0xCB, 0x68 }",
+            b"};",
             b"",
             b"STATIC",
             b"BOOLEAN",
@@ -325,7 +328,7 @@ def main() -> int:
             b"",
             b"  Vreg   = NULL;",
             b"  Status = gBS->LocateProtocol (",
-            b"                  &gQcomPmicVregProtocolGuid,",
+            b"                  &mPmicVregProtocolGuid,",
             b"                  NULL,",
             b"                  (VOID **)&Vreg",
             b"                  );",
@@ -715,8 +718,6 @@ def main() -> int:
         + b"  gEfiBlockIoProtocolGuid"
         + inf_eol
         + b"  gEfiLoadedImageProtocolGuid"
-        + inf_eol
-        + b"  gQcomPmicVregProtocolGuid"
         + inf_eol
         + b"  gEfiSimpleFileSystemProtocolGuid",
         "BlockIo protocol dependency",
