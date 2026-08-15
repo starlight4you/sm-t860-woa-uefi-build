@@ -43,7 +43,7 @@ git -C "$build_root" fetch --force origin "$source_commit"
 git -C "$build_root" checkout --detach "$source_commit"
 test "$(git -C "$build_root" rev-parse HEAD)" = "$source_commit"
 git -C "$build_root" submodule sync --recursive
-git -C "$build_root" submodule update --init --recursive
+git -C "$build_root" submodule update --init --recursive --jobs 8
 test "$(git -C "$build_root/Common/MU" rev-parse HEAD)" = "$mu_plus_commit"
 python3 "$preparation" "$build_root" --report "$output_dir/source-preparation.json"
 
@@ -60,7 +60,9 @@ command -v "${CLANGPDB_AARCH64_PREFIX}gcc" >/dev/null 2>&1 || {
 (
     cd "$build_root"
     source "$build_venv/bin/activate"
-    python -m pip install --upgrade -r pip-requirements.txt 'uefi_firmware==1.16'
+    python -m pip install --upgrade \
+        'setuptools==70.3.0' 'uefi_firmware==1.16' \
+        -r pip-requirements.txt
     python ./build_uefi.py -d samsung-gts6lwifi
 ) 2>&1 | tee "$output_dir/build.log"
 
